@@ -5,13 +5,13 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from src.config.env import PROJECT_ROOT, get_required_env_file_value
+from src.config.env import PROJECT_ROOT, get_env_file_value
 
 #######################################################################################
 # Estate globals:
 #######################################################################################
 
-SERVICE_SOURCE: str = get_required_env_file_value("SERVICE_SOURCE")
+SERVICE_SOURCE: str = get_env_file_value("SERVICE_SOURCE", "estate_service")
 
 ROOMS_NUM_MAP: dict[str, int] = {
     "ONE": 1,
@@ -84,8 +84,8 @@ REQUEST_TIMEOUT_SECONDS: int = 30
 REQUEST_RETRIES: int = 3
 REQUEST_RETRY_SLEEP_SECONDS: float = 1.0
 
-MAIN_URL: str = get_required_env_file_value("MAIN_URL")
-ESTATE_URL: str = get_required_env_file_value("ESTATE_URL")
+MAIN_URL: str = get_env_file_value("MAIN_URL", "https://example.invalid/results/")
+ESTATE_URL: str = get_env_file_value("ESTATE_URL", "https://example.invalid/estate/")
 
 HEADERS: dict[str, str] = {
     "User-Agent": (

@@ -77,6 +77,7 @@ def test_run_cli_calls_scraper_with_selected_filters_and_prints_json() -> None:
         ],
         scraper=scraper,
         saver=saver,
+        validator=lambda: None,
         stdout=stdout,
     )
 

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
+from src.config.env import get_required_env_file_value
 from src.config.globals import ESTATE_TYPES, MAX_PAGE, VOIVODESHIPS
 from src.models.estate import Estate
 from src.scraper.estate_scraper import scrape_estates
@@ -27,6 +28,7 @@ class CliOptions:
 
 ScrapeFn = Callable[..., list[Estate]]
 SaveFn = Callable[..., Path]
+ValidateFn = Callable[[], None]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -95,13 +97,20 @@ def parse_cli_args(args: Sequence[str] | None = None) -> CliOptions:
         parser.error(str(exc))
 
 
+def _validate_required_runtime_env() -> None:
+    get_required_env_file_value("MAIN_URL")
+    get_required_env_file_value("ESTATE_URL")
+
+
 def run_cli(
     args: Sequence[str] | None = None,
     *,
     scraper: ScrapeFn = scrape_estates,
     saver: SaveFn = save_estates_to_bronze,
+    validator: ValidateFn = _validate_required_runtime_env,
     stdout: TextIO = sys.stdout,
 ) -> int:
+    validator()
     options = parse_cli_args(args)
     logger.info(
         "CLI run started: estate_types=%s voivodeships=%s max_page=%s",

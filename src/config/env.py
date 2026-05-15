@@ -46,3 +46,10 @@ def get_required_env_file_value(key: str) -> str:
         raise RuntimeError(f"Missing required .env variable: {key}")
 
     return normalize_url(raw_value)
+
+
+def get_env_file_value(key: str, default: str) -> str:
+    env_file_vars = _read_env_file()
+    raw_value = env_file_vars.get(key) or default
+
+    return normalize_url(raw_value)

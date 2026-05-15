@@ -204,7 +204,7 @@ cython_debug/
 tempCodeRunnerFile.py
 
 # Ruff stuff:
-.ruff_cache/
+.ruff_cache
 
 # PyPI configuration file
 .pypirc
@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Db files
+*.db
+

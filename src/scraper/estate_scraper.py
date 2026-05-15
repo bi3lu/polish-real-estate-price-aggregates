@@ -15,6 +15,7 @@ from typing import Any, cast
 from src.config.globals import (
     ESTATE_TYPES,
     ESTATE_URL,
+    FLOOR_MAP,
     HEADERS,
     MAIN_URL,
     MAX_PAGE,
@@ -284,7 +285,7 @@ def get_estate_info(
             attributes,
             ("market", "marketType", "market_type", "MarketType"),
         ),
-        floor=_extract_text(estate_data, attributes, ("floor", "floorNumber")),
+        floor=_extract_floor(estate_data, attributes),
         building_type=_extract_text(
             estate_data,
             attributes,
@@ -742,6 +743,31 @@ def _extract_rooms(
 
     if text_value is not None:
         mapped_value = ROOMS_NUM_MAP.get(text_value.upper())
+
+        if mapped_value is not None:
+            return mapped_value
+
+    parsed_value = _parse_float(raw_value)
+
+    if parsed_value is None:
+        return None
+
+    return int(parsed_value)
+
+
+def _extract_floor(
+    estate_data: Mapping[str, Any],
+    attributes: Mapping[str, Any],
+) -> int | None:
+    raw_value = _first_found_value(estate_data, ("floor", "floorNumber"))
+
+    if raw_value is None:
+        raw_value = _find_attribute_value(attributes, ("floor", "floorNumber"))
+
+    text_value = _as_text(raw_value)
+
+    if text_value is not None:
+        mapped_value = FLOOR_MAP.get(text_value.upper())
 
         if mapped_value is not None:
             return mapped_value

@@ -25,7 +25,7 @@ class Estate(BaseModel):
     district: str | None = None
     street: str | None = None
     market: str | None = None
-    floor: str | None = None
+    floor: int | None = None
     building_type: str | None = None
     seller_name: str | None = None
     seller_type: str | None = None

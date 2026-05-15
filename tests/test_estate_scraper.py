@@ -111,7 +111,7 @@ def test_get_estate_info_maps_wide_listing_snapshot() -> None:
     assert estate.district == "Mokotów"
     assert estate.street == "Puławska"
     assert estate.market == "SECONDARY"
-    assert estate.floor == "2"
+    assert estate.floor == 2
     assert estate.building_type == "BLOCK"
     assert estate.seller_name == "Biuro Testowe"
     assert estate.seller_type == "AGENCY"
@@ -177,7 +177,7 @@ def test_get_estate_info_maps_nested_location_objects() -> None:
     assert estate.price_per_sqm == 15419
     assert estate.area_sqm == 45.4
     assert estate.rooms == 2
-    assert estate.floor == "FIRST"
+    assert estate.floor == 1
 
 
 def test_scrape_estates_for_stops_after_empty_page() -> None:

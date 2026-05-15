@@ -1,0 +1,341 @@
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
+
+from src.config.env import normalize_url
+from src.config.globals import ESTATE_URL, MAIN_URL
+from src.scraper.estate_scraper import (
+    build_listing_url,
+    extract_listing_items,
+    extract_next_data_from_html,
+    get_estate_info,
+    scrape_estates_for,
+)
+
+
+def test_normalize_url_fixes_missing_initial_h() -> None:
+    assert normalize_url(MAIN_URL.removeprefix("h")) == MAIN_URL
+
+
+def test_build_listing_url_uses_estate_type_voivodeship_and_page() -> None:
+    assert build_listing_url("mieszkanie", "mazowieckie", page=2) == (
+        f"{MAIN_URL.rstrip('/')}/mieszkanie/mazowieckie?viewType=listing&page=2"
+    )
+
+
+def test_extract_next_data_from_html_parses_next_script() -> None:
+    html = """
+    <html>
+      <script id="__NEXT_DATA__" type="application/json">
+        {"props": {"pageProps": {"data": {"searchAds": {"items": [{"id": 1}]}}}}}
+      </script>
+    </html>
+    """
+
+    next_data_json = extract_next_data_from_html(html)
+
+    assert extract_listing_items(next_data_json) == [{"id": 1}]
+
+
+def test_extract_listing_items_supports_next_data_json_variant() -> None:
+    next_data_json = {
+        "pageProps": {
+            "data": {
+                "searchAds": {
+                    "items": [
+                        {"id": "first"},
+                        {"id": "second"},
+                    ]
+                }
+            }
+        }
+    }
+
+    assert extract_listing_items(next_data_json) == [
+        {"id": "first"},
+        {"id": "second"},
+    ]
+
+
+def test_get_estate_info_maps_wide_listing_snapshot() -> None:
+    image_one_url = f"{ESTATE_URL.rstrip('/')}/image-one.jpg"
+    image_two_url = f"{ESTATE_URL.rstrip('/')}/image-two.jpg"
+
+    estate = get_estate_info(
+        {
+            "id": "ABC123",
+            "title": "Jasne mieszkanie z balkonem",
+            "slug": "jasne-mieszkanie-z-balkonem-IDABC123",
+            "totalPrice": {"value": "750 000 zł"},
+            "pricePerSquareMeter": "15 000 zł/m²",
+            "areaInSquareMeters": 50,
+            "characteristics": [
+                {"key": "rooms_num", "value": "THREE"},
+                {"key": "market", "value": "SECONDARY"},
+                {"key": "floor", "value": "2"},
+                {"key": "buildingType", "value": "BLOCK"},
+            ],
+            "location": {
+                "address": {
+                    "city": "Warszawa",
+                    "district": "Mokotów",
+                    "street": "Puławska",
+                },
+                "coordinates": {
+                    "latitude": 52.189,
+                    "longitude": 21.012,
+                },
+            },
+            "advertiserName": "Biuro Testowe",
+            "advertiserType": "AGENCY",
+            "images": [
+                {"url": image_one_url},
+                {"medium": image_two_url},
+            ],
+        },
+        estate_type="mieszkanie",
+        voivodeship="mazowieckie",
+    )
+
+    assert estate is not None
+    assert estate.external_id == "ABC123"
+    assert estate.url == (
+        f"{ESTATE_URL.rstrip('/')}/jasne-mieszkanie-z-balkonem-IDABC123"
+    )
+    assert estate.price == 750000
+    assert estate.price_per_sqm == 15000
+    assert estate.area_sqm == 50
+    assert estate.rooms == 3
+    assert estate.city == "Warszawa"
+    assert estate.district == "Mokotów"
+    assert estate.street == "Puławska"
+    assert estate.market == "SECONDARY"
+    assert estate.floor == "2"
+    assert estate.building_type == "BLOCK"
+    assert estate.seller_name == "Biuro Testowe"
+    assert estate.seller_type == "AGENCY"
+    assert estate.latitude == 52.189
+    assert estate.longitude == 21.012
+    assert estate.images == [
+        image_one_url,
+        image_two_url,
+    ]
+
+
+def test_get_estate_info_maps_nested_location_objects() -> None:
+    estate = get_estate_info(
+        {
+            "id": 68001411,
+            "title": "2 pokoje",
+            "href": "[lang]/ad/2-pokoje-ID4BkgX",
+            "totalPrice": {"value": 700000, "currency": "PLN"},
+            "pricePerSquareMeter": {"value": 15419, "currency": "PLN"},
+            "areaInSquareMeters": 45.4,
+            "roomsNumber": "TWO",
+            "floorNumber": "FIRST",
+            "location": {
+                "address": {
+                    "street": {"name": "Żytnia", "number": ""},
+                    "city": {"name": "Warszawa"},
+                    "province": {"name": "mazowieckie"},
+                },
+                "reverseGeocoding": {
+                    "locations": [
+                        {
+                            "id": "mazowieckie",
+                            "fullName": "mazowieckie",
+                            "name": "mazowieckie",
+                            "locationLevel": "voivodeship",
+                        },
+                        {
+                            "id": "mazowieckie/warszawa",
+                            "fullName": "Warszawa, mazowieckie",
+                            "name": "Warszawa",
+                            "locationLevel": "city_or_village",
+                        },
+                        {
+                            "id": "mazowieckie/warszawa/wola",
+                            "fullName": "Wola, Warszawa, mazowieckie",
+                            "name": "Wola",
+                            "locationLevel": "district",
+                        },
+                    ]
+                },
+            },
+        },
+        estate_type="mieszkanie",
+        voivodeship="mazowieckie",
+    )
+
+    assert estate is not None
+    assert estate.city == "Warszawa"
+    assert estate.district == "Wola"
+    assert estate.street == "Żytnia"
+    assert estate.location == "Żytnia, Wola, Warszawa"
+    assert estate.price == 700000
+    assert estate.price_per_sqm == 15419
+    assert estate.area_sqm == 45.4
+    assert estate.rooms == 2
+    assert estate.floor == "FIRST"
+
+
+def test_scrape_estates_for_stops_after_empty_page() -> None:
+    requested_urls: list[str] = []
+    responses: list[dict[str, Any]] = [
+        {
+            "props": {
+                "pageProps": {
+                    "data": {
+                        "searchAds": {
+                            "items": [
+                                {
+                                    "id": "first",
+                                    "title": "Pierwsza oferta",
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        {"props": {"pageProps": {"data": {"searchAds": {"items": []}}}}},
+    ]
+
+    def fetcher(url: str) -> Mapping[str, Any]:
+        requested_urls.append(url)
+        return responses.pop(0)
+
+    estates = scrape_estates_for(
+        "mieszkanie",
+        "mazowieckie",
+        max_page=5,
+        fetcher=fetcher,
+        detail_fetcher=None,
+    )
+
+    assert [estate.external_id for estate in estates] == ["first"]
+    assert requested_urls == [
+        f"{MAIN_URL.rstrip('/')}/mieszkanie/mazowieckie?viewType=listing&page=1",
+        f"{MAIN_URL.rstrip('/')}/mieszkanie/mazowieckie?viewType=listing&page=2",
+    ]
+
+
+def test_scrape_estates_for_enriches_listing_with_detail_page() -> None:
+    requested_detail_urls: list[str] = []
+    listing_response = {
+        "props": {
+            "pageProps": {
+                "data": {
+                    "searchAds": {
+                        "items": [
+                            {
+                                "id": "67792619",
+                                "title": "Pięknie położony dom",
+                                "href": "[lang]/ad/pieknie-polozony-dom-ID4ArXl",
+                                "totalPrice": {"value": 2600000},
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    }
+
+    def fetcher(url: str) -> Mapping[str, Any]:
+        return listing_response if "page=1" in url else {}
+
+    def detail_fetcher(url: str) -> Mapping[str, Any]:
+        requested_detail_urls.append(url)
+        return {
+            "props": {
+                "pageProps": {
+                    "ad": {
+                        "id": 67792619,
+                        "slug": "pieknie-polozony-dom-ID4ArXl",
+                        "market": "SECONDARY",
+                        "advertType": "AGENCY",
+                        "target": {
+                            "Building_type": ["detached"],
+                        },
+                        "location": {
+                            "coordinates": {
+                                "latitude": 52.5200528,
+                                "longitude": 21.075463,
+                            },
+                            "address": {
+                                "city": {"name": "Serock"},
+                                "street": None,
+                                "district": None,
+                            },
+                        },
+                        "agency": {
+                            "name": "Magiczny Dom",
+                            "type": "agency",
+                        },
+                    }
+                }
+            }
+        }
+
+    estates = scrape_estates_for(
+        "dom",
+        "mazowieckie",
+        max_page=1,
+        fetcher=fetcher,
+        detail_fetcher=detail_fetcher,
+    )
+
+    assert requested_detail_urls == [
+        f"{ESTATE_URL.rstrip('/')}/pieknie-polozony-dom-ID4ArXl"
+    ]
+    assert len(estates) == 1
+    assert estates[0].city == "Serock"
+    assert estates[0].location == "Serock"
+    assert estates[0].market == "SECONDARY"
+    assert estates[0].building_type == "detached"
+    assert estates[0].seller_name == "Magiczny Dom"
+    assert estates[0].seller_type == "agency"
+    assert estates[0].latitude == 52.5200528
+    assert estates[0].longitude == 21.075463
+
+
+def test_scrape_estates_for_normalizes_prefixed_detail_url() -> None:
+    requested_detail_urls: list[str] = []
+    listing_response = {
+        "props": {
+            "pageProps": {
+                "data": {
+                    "searchAds": {
+                        "items": [
+                            {
+                                "id": "listing-1",
+                                "title": "Oferta",
+                                "href": ("[lang]/ad/hpr/" "4pokojw-w-promocji-ID4Bmyv"),
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    }
+
+    def fetcher(url: str) -> Mapping[str, Any]:
+        return listing_response
+
+    def detail_fetcher(url: str) -> Mapping[str, Any]:
+        requested_detail_urls.append(url)
+        return {}
+
+    estates = scrape_estates_for(
+        "mieszkanie",
+        "mazowieckie",
+        max_page=1,
+        fetcher=fetcher,
+        detail_fetcher=detail_fetcher,
+    )
+
+    assert requested_detail_urls == [
+        f"{ESTATE_URL.rstrip('/')}/4pokojw-w-promocji-ID4Bmyv"
+    ]
+    assert estates[0].url == f"{ESTATE_URL.rstrip('/')}/4pokojw-w-promocji-ID4Bmyv"

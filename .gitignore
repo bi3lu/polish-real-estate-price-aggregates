@@ -218,5 +218,9 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Db files
-*.db
 
+# Project data snapshots
+data/bronze/*.json
+data/silver/*.json
+data/gold/*.json
+*.db

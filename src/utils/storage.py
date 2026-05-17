@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from src.config.globals import BRONZE_DATA_DIR
+from src.config.globals import BRONZE_DATA_DIR, BRONZE_STREAM_CHECKPOINT_INTERVAL
 from src.models.estate import Estate
 from src.utils.logger import get_logger
 
@@ -57,37 +57,282 @@ def stream_estates_to_bronze(
 ) -> tuple[Path, int]:
     snapshot_time = scraped_at or datetime.now(timezone.utc)
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / _build_stream_snapshot_filename(snapshot_time)
+    output_path = output_dir / _build_stream_manifest_filename()
+    paths_by_voivodeship: dict[str, Path] = {}
+    pending_records_by_voivodeship: dict[str, list[dict[str, Any]]] = {}
+    new_counts_by_voivodeship: dict[str, int] = {}
+    normalized_paths: set[Path] = set()
+    seen_external_ids = load_bronze_external_ids_by_voivodeship(output_dir)
     count = 0
-    logger.info("Streaming bronze snapshot to %s", output_path)
+    duplicate_count = 0
+    caught_error: BaseException | None = None
+    logger.info("Streaming bronze records by voivodeship under %s", output_dir)
 
-    with output_path.open("w", encoding="utf-8") as output_file:
-        metadata: dict[str, Any] = {
-            "record_type": "metadata",
-            "scraped_at": snapshot_time.isoformat(),
-            "estate_types": list(estate_types),
-            "voivodeships": list(voivodeships),
-            "max_page": max_page,
-        }
-        output_file.write(json.dumps(metadata, ensure_ascii=False) + "\n")
-
+    try:
         for estate in estates:
-            record: dict[str, Any] = {
-                "record_type": "estate",
-                "data": estate.model_dump(mode="json"),
-            }
-            output_file.write(json.dumps(record, ensure_ascii=False) + "\n")
+            voivodeship = estate.voivodeship or "unknown"
+            external_id = str(estate.external_id)
+            voivodeship_seen_ids = seen_external_ids.setdefault(voivodeship, set())
+
+            if external_id in voivodeship_seen_ids:
+                duplicate_count += 1
+                continue
+
+            pending_records_by_voivodeship.setdefault(voivodeship, []).append(
+                estate.model_dump(mode="json")
+            )
+            new_counts_by_voivodeship[voivodeship] = (
+                new_counts_by_voivodeship.get(voivodeship, 0) + 1
+            )
+            voivodeship_seen_ids.add(external_id)
             count += 1
 
             if count % 100 == 0:
-                output_file.flush()
-                logger.info("Streamed %s bronze records to %s", count, output_path)
+                logger.info(
+                    "Streamed %s new bronze records under %s",
+                    count,
+                    output_dir,
+                )
 
+            pending_count = len(pending_records_by_voivodeship[voivodeship])
+
+            if pending_count >= BRONZE_STREAM_CHECKPOINT_INTERVAL:
+                voivodeship_path = _append_voivodeship_checkpoint(
+                    output_dir=output_dir,
+                    voivodeship=voivodeship,
+                    records=pending_records_by_voivodeship[voivodeship],
+                    normalized_paths=normalized_paths,
+                )
+                paths_by_voivodeship[voivodeship] = voivodeship_path
+                pending_records_by_voivodeship[voivodeship] = []
+                logger.info(
+                    "Checkpointed %s pending bronze records for voivodeship=%s to %s",
+                    pending_count,
+                    voivodeship,
+                    voivodeship_path,
+                )
+
+    except BaseException as exc:
+        caught_error = exc
+
+    target_voivodeships = set(voivodeships) | set(pending_records_by_voivodeship)
+
+    for voivodeship in sorted(target_voivodeships):
+        pending_records = pending_records_by_voivodeship.get(voivodeship, [])
+        voivodeship_path = _canonical_voivodeship_snapshot_path(
+            output_dir,
+            voivodeship,
+        )
+
+        if (
+            not pending_records
+            and voivodeship not in paths_by_voivodeship
+            and not voivodeship_path.exists()
+        ):
+            continue
+
+        if pending_records:
+            voivodeship_path = _append_voivodeship_checkpoint(
+                output_dir=output_dir,
+                voivodeship=voivodeship,
+                records=pending_records,
+                normalized_paths=normalized_paths,
+            )
+            pending_records_by_voivodeship[voivodeship] = []
+
+        paths_by_voivodeship[voivodeship] = voivodeship_path
+
+    manifest: dict[str, Any] = {
+        "updated_at": snapshot_time.isoformat(),
+        "estate_types": list(estate_types),
+        "voivodeships": list(voivodeships),
+        "max_page": max_page,
+        "new_records_count": count,
+        "duplicates_skipped": duplicate_count,
+        "files": {
+            voivodeship: {
+                "path": str(path),
+                "new_records_count": new_counts_by_voivodeship.get(voivodeship, 0),
+                "total_records_count": len(
+                    seen_external_ids.get(voivodeship, set())
+                ),
+            }
+            for voivodeship, path in sorted(paths_by_voivodeship.items())
+        },
+    }
+    output_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     logger.info(
-        "Finished bronze streaming: records=%s output_path=%s", count, output_path
+        "Finished bronze streaming: new_records=%s duplicates=%s manifest=%s",
+        count,
+        duplicate_count,
+        output_path,
     )
 
+    if caught_error is not None:
+        raise caught_error
+
     return output_path, count
+
+
+def load_bronze_external_ids_by_voivodeship(
+    bronze_dir: Path = BRONZE_DATA_DIR,
+) -> dict[str, set[str]]:
+    """Loads external ids already present in bronze snapshots grouped by voivodeship."""
+    external_ids: dict[str, set[str]] = {}
+
+    if not bronze_dir.exists():
+        return external_ids
+
+    for snapshot_path in sorted(
+        [
+            *bronze_dir.glob("estate_snapshot_*.json"),
+            *bronze_dir.glob("estate_snapshot_*.jsonl"),
+            *bronze_dir.glob("*/estate_snapshot_*.json"),
+            *bronze_dir.glob("*/estate_snapshot_*.jsonl"),
+        ]
+    ):
+        for estate_data in _iter_bronze_estate_payloads(snapshot_path):
+            external_id = estate_data.get("external_id")
+            voivodeship = estate_data.get("voivodeship")
+
+            if external_id is None or voivodeship is None:
+                continue
+
+            external_ids.setdefault(str(voivodeship), set()).add(str(external_id))
+
+    return external_ids
+
+
+def _iter_bronze_estate_payloads(snapshot_path: Path) -> Iterable[dict[str, Any]]:
+    if snapshot_path.suffix == ".jsonl":
+        with snapshot_path.open(encoding="utf-8") as input_file:
+            for line in input_file:
+                stripped_line = line.strip()
+
+                if not stripped_line:
+                    continue
+
+                record = json.loads(stripped_line)
+
+                if not isinstance(record, dict):
+                    continue
+
+                if record.get("record_type") != "estate":
+                    continue
+
+                estate_data = record.get("data")
+
+                if isinstance(estate_data, dict):
+                    yield estate_data
+
+        return
+
+    payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+
+    if not isinstance(payload, dict):
+        return
+
+    data = payload.get("data", [])
+
+    if not isinstance(data, list):
+        return
+
+    for item in data:
+        if isinstance(item, dict):
+            yield item
+
+
+def _append_voivodeship_checkpoint(
+    *,
+    output_dir: Path,
+    voivodeship: str,
+    records: list[dict[str, Any]],
+    normalized_paths: set[Path] | None = None,
+) -> Path:
+    voivodeship_path = _canonical_voivodeship_snapshot_path(
+        output_dir,
+        voivodeship,
+    )
+    voivodeship_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if normalized_paths is not None and voivodeship_path not in normalized_paths:
+        _ensure_estate_jsonl_only(voivodeship_path)
+        normalized_paths.add(voivodeship_path)
+
+    _ensure_trailing_newline(voivodeship_path)
+
+    with voivodeship_path.open("a", encoding="utf-8") as output_file:
+        for record in records:
+            output_file.write(
+                json.dumps(
+                    {
+                        "record_type": "estate",
+                        "data": record,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+
+    return voivodeship_path
+
+
+def _ensure_estate_jsonl_only(path: Path) -> None:
+    if not path.exists() or path.stat().st_size == 0:
+        return
+
+    temp_path = path.with_suffix(f"{path.suffix}.tmp")
+    changed = False
+
+    with path.open(encoding="utf-8") as input_file, temp_path.open(
+        "w",
+        encoding="utf-8",
+    ) as output_file:
+        for line in input_file:
+            stripped_line = line.strip()
+
+            if not stripped_line:
+                continue
+
+            try:
+                record = json.loads(stripped_line)
+
+            except json.JSONDecodeError:
+                changed = True
+                continue
+
+            if isinstance(record, dict) and record.get("record_type") == "estate":
+                output_file.write(json.dumps(record, ensure_ascii=False) + "\n")
+                continue
+
+            changed = True
+
+    if changed:
+        temp_path.replace(path)
+        return
+
+    temp_path.unlink()
+
+
+def _ensure_trailing_newline(path: Path) -> None:
+    if not path.exists() or path.stat().st_size == 0:
+        return
+
+    with path.open("rb+") as output_file:
+        output_file.seek(-1, 2)
+
+        if output_file.read(1) != b"\n":
+            output_file.write(b"\n")
+
+
+def _canonical_voivodeship_snapshot_path(
+    output_dir: Path,
+    voivodeship: str,
+) -> Path:
+    return output_dir / voivodeship / _build_canonical_voivodeship_filename(voivodeship)
 
 
 def _build_snapshot_filename(scraped_at: datetime) -> str:
@@ -95,6 +340,9 @@ def _build_snapshot_filename(scraped_at: datetime) -> str:
     return f"estate_snapshot_{timestamp}.json"
 
 
-def _build_stream_snapshot_filename(scraped_at: datetime) -> str:
-    timestamp = scraped_at.strftime("%Y%m%dT%H%M%S%fZ")
-    return f"estate_snapshot_{timestamp}.jsonl"
+def _build_canonical_voivodeship_filename(voivodeship: str) -> str:
+    return f"estate_snapshot_{voivodeship}.jsonl"
+
+
+def _build_stream_manifest_filename() -> str:
+    return "estate_snapshot_manifest.json"

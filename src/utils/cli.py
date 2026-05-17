@@ -9,14 +9,16 @@ from pathlib import Path
 from typing import TextIO
 
 from src.config.env import get_required_env_file_value
-from src.config.globals import ESTATE_TYPES, MAX_PAGE, VOIVODESHIPS
+from src.config.globals import ESTATE_TYPES, MAX_PAGE, VOIVODESHIPS, DEFAULT_WORKERS
 from src.models.estate import Estate
 from src.scraper.estate_scraper import iter_estates
 from src.utils.logger import get_logger
-from src.utils.storage import stream_estates_to_bronze
+from src.utils.storage import (
+    load_bronze_external_ids_by_voivodeship,
+    stream_estates_to_bronze,
+)
 
 logger = get_logger(__name__)
-DEFAULT_WORKERS = 4
 
 
 @dataclass(frozen=True)
@@ -31,6 +33,7 @@ class CliOptions:
 ScrapeFn = Callable[..., Iterable[Estate]]
 SaveFn = Callable[..., tuple[Path, int]]
 ValidateFn = Callable[[], None]
+ExistingIdsLoaderFn = Callable[[], dict[str, set[str]]]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -121,6 +124,7 @@ def run_cli(
     scraper: ScrapeFn = iter_estates,
     saver: SaveFn = stream_estates_to_bronze,
     validator: ValidateFn = _validate_required_runtime_env,
+    existing_ids_loader: ExistingIdsLoaderFn = load_bronze_external_ids_by_voivodeship,
     stdout: TextIO = sys.stdout,
 ) -> int:
     validator()
@@ -132,11 +136,21 @@ def run_cli(
         options.max_page,
         options.workers,
     )
+    existing_external_ids_by_voivodeship = existing_ids_loader()
+    selected_existing_count = sum(
+        len(existing_external_ids_by_voivodeship.get(voivodeship, set()))
+        for voivodeship in options.voivodeships
+    )
+    logger.info(
+        "Loaded %s existing bronze external ids for selected voivodeships",
+        selected_existing_count,
+    )
     estates = scraper(
         estate_types=options.estate_types,
         voivodeships=options.voivodeships,
         max_page=options.max_page,
         workers=options.workers,
+        existing_external_ids_by_voivodeship=existing_external_ids_by_voivodeship,
     )
     output_path, count = saver(
         estates,

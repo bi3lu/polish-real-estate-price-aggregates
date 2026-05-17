@@ -17,6 +17,7 @@ def test_parse_cli_args_defaults_to_all_configured_values() -> None:
 
     assert set(options.estate_types) == ESTATE_TYPES
     assert set(options.voivodeships) == VOIVODESHIPS
+    assert options.workers == 4
 
 
 def test_parse_cli_args_accepts_repeated_and_comma_separated_filters() -> None:
@@ -32,12 +33,15 @@ def test_parse_cli_args_accepts_repeated_and_comma_separated_filters() -> None:
             "slaskie",
             "--max-page",
             "3",
+            "--threads",
+            "2",
         ]
     )
 
     assert options.estate_types == ("mieszkanie", "dom", "kawalerka")
     assert options.voivodeships == ("mazowieckie", "pomorskie", "slaskie")
     assert options.max_page == 3
+    assert options.workers == 2
 
 
 def test_parse_cli_args_rejects_unknown_values() -> None:
@@ -61,10 +65,11 @@ def test_run_cli_calls_scraper_with_selected_filters_and_prints_json() -> None:
             )
         ]
 
-    def saver(estates: list[Estate], **kwargs: Any) -> Path:
+    def saver(estates: list[Estate], **kwargs: Any) -> tuple[Path, int]:
+        estate_list = list(estates)
         captured_save_kwargs.update(kwargs)
-        captured_save_kwargs["estates"] = estates
-        return Path("data/bronze/estate_snapshot_test.json")
+        captured_save_kwargs["estates"] = estate_list
+        return Path("data/bronze/estate_snapshot_test.jsonl"), len(estate_list)
 
     exit_code = run_cli(
         [
@@ -86,6 +91,7 @@ def test_run_cli_calls_scraper_with_selected_filters_and_prints_json() -> None:
         "estate_types": ("mieszkanie",),
         "voivodeships": ("mazowieckie",),
         "max_page": 2,
+        "workers": 4,
     }
     assert captured_save_kwargs["estate_types"] == ("mieszkanie",)
     assert captured_save_kwargs["voivodeships"] == ("mazowieckie",)
@@ -94,8 +100,9 @@ def test_run_cli_calls_scraper_with_selected_filters_and_prints_json() -> None:
         "listing-1"
     ]
     assert json.loads(stdout.getvalue()) == {
-        "output_path": "data/bronze/estate_snapshot_test.json",
+        "output_path": "data/bronze/estate_snapshot_test.jsonl",
         "count": 1,
         "estate_types": ["mieszkanie"],
         "voivodeships": ["mazowieckie"],
+        "workers": 4,
     }

@@ -74,6 +74,17 @@ ESTATE_TYPES: frozenset[str] = frozenset(
     }
 )
 
+ADDITIONAL_FEATURES: frozenset[str] = frozenset(
+    {
+        "informacje_dodatkowe",
+        "media",
+        "wyposazenie",
+        "zabezpieczenia",
+        "przestrzen_dodatkowa",
+        "udogodnienia",
+    }
+)
+
 #######################################################################################
 # HTTP globals:
 #######################################################################################
@@ -111,3 +122,4 @@ SILVER_DATA_DIR: Path = PROJECT_ROOT / "data" / "silver"
 GOLD_DATA_DIR: Path = PROJECT_ROOT / "data" / "gold"
 
 NUMBER_RE = re.compile(r"\d+(?:[\s\u00a0]\d{3})*(?:[,.]\d+)?|\d+(?:[,.]\d+)?")
+LIST_SEPARATOR = "|"

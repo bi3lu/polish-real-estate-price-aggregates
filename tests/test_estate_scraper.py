@@ -10,12 +10,15 @@ from src.scraper.estate_scraper import (
     extract_listing_items,
     extract_next_data_from_html,
     get_estate_info,
+    iter_estates,
     scrape_estates_for,
 )
 
 
-def test_normalize_url_fixes_missing_initial_h() -> None:
-    assert normalize_url(MAIN_URL.removeprefix("h")) == MAIN_URL
+def test_normalize_url() -> None:
+    assert normalize_url("  https://example.invalid/results/") == (
+        "https://example.invalid/results/"
+    )
 
 
 def test_build_listing_url_uses_estate_type_voivodeship_and_page() -> None:
@@ -218,6 +221,124 @@ def test_scrape_estates_for_stops_after_empty_page() -> None:
     assert requested_urls == [
         f"{MAIN_URL.rstrip('/')}/mieszkanie/mazowieckie?viewType=listing&page=1",
         f"{MAIN_URL.rstrip('/')}/mieszkanie/mazowieckie?viewType=listing&page=2",
+    ]
+
+
+def test_scrape_estates_for_stops_after_duplicate_page() -> None:
+    requested_urls: list[str] = []
+    responses: list[dict[str, Any]] = [
+        {
+            "props": {
+                "pageProps": {
+                    "data": {
+                        "searchAds": {
+                            "items": [
+                                {
+                                    "id": "repeated",
+                                    "title": "Pierwsza oferta",
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "props": {
+                "pageProps": {
+                    "data": {
+                        "searchAds": {
+                            "items": [
+                                {
+                                    "id": "repeated",
+                                    "title": "Ta sama oferta",
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "props": {
+                "pageProps": {
+                    "data": {
+                        "searchAds": {
+                            "items": [
+                                {
+                                    "id": "should-not-be-fetched",
+                                    "title": "Kolejna oferta",
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+    ]
+
+    def fetcher(url: str) -> Mapping[str, Any]:
+        requested_urls.append(url)
+        return responses.pop(0)
+
+    estates = scrape_estates_for(
+        "mieszkanie",
+        "mazowieckie",
+        max_page=5,
+        fetcher=fetcher,
+        detail_fetcher=None,
+    )
+
+    assert [estate.external_id for estate in estates] == ["repeated"]
+    assert requested_urls == [
+        f"{MAIN_URL.rstrip('/')}/mieszkanie/mazowieckie?viewType=listing&page=1",
+        f"{MAIN_URL.rstrip('/')}/mieszkanie/mazowieckie?viewType=listing&page=2",
+    ]
+
+
+def test_iter_estates_supports_worker_threads() -> None:
+    def fetcher(url: str) -> Mapping[str, Any]:
+        if "page=2" in url:
+            return {"props": {"pageProps": {"data": {"searchAds": {"items": []}}}}}
+
+        if "mazowieckie" in url:
+            listing_id = "mazowieckie-listing"
+            voivodeship = "mazowieckie"
+        else:
+            listing_id = "pomorskie-listing"
+            voivodeship = "pomorskie"
+
+        return {
+            "props": {
+                "pageProps": {
+                    "data": {
+                        "searchAds": {
+                            "items": [
+                                {
+                                    "id": listing_id,
+                                    "title": f"Oferta {voivodeship}",
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+
+    estates = list(
+        iter_estates(
+            estate_types=("mieszkanie",),
+            voivodeships=("mazowieckie", "pomorskie"),
+            max_page=2,
+            workers=2,
+            fetcher=fetcher,
+            detail_fetcher=None,
+        )
+    )
+
+    assert sorted((estate.voivodeship, estate.external_id) for estate in estates) == [
+        ("mazowieckie", "mazowieckie-listing"),
+        ("pomorskie", "pomorskie-listing"),
     ]
 
 

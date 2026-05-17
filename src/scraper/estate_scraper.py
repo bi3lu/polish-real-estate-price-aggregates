@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import queue
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from html import unescape
 from html.parser import HTMLParser
 from typing import Any, cast
@@ -31,6 +34,14 @@ from src.models.estate import Estate
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class _WorkerFinished:
+    estate_type: str
+    voivodeship: str
+    count: int
+    error: Exception | None = None
 
 
 class _NextDataHTMLParser(HTMLParser):
@@ -317,15 +328,36 @@ def scrape_estates_for(
     detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
 ) -> list[Estate]:
     """Scrapes listings for a single estate type and voivodeship."""
+    return list(
+        iter_estates_for(
+            estate_type,
+            voivodeship,
+            max_page=max_page,
+            fetcher=fetcher,
+            detail_fetcher=detail_fetcher,
+        )
+    )
+
+
+def iter_estates_for(
+    estate_type: str,
+    voivodeship: str,
+    *,
+    max_page: int = MAX_PAGE,
+    fetcher: Callable[[str], Mapping[str, Any]] = fetch_next_data_json,
+    detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
+) -> Iterable[Estate]:
+    """Yields listings for a single estate type and voivodeship."""
     if estate_type not in ESTATE_TYPES:
         raise ValueError(f"Unsupported estate type: {estate_type}")
 
     if voivodeship not in VOIVODESHIPS:
         raise ValueError(f"Unsupported voivodeship: {voivodeship}")
 
-    estates: list[Estate] = []
+    total_estates_count = 0
+    seen_external_ids: set[str] = set()
     logger.info(
-        "Scraping started for estate_type=%s voivodeship=%s max_page=%s",
+        "Streaming scrape started for estate_type=%s voivodeship=%s max_page=%s",
         estate_type,
         voivodeship,
         max_page,
@@ -353,8 +385,18 @@ def scrape_estates_for(
             break
 
         page_estates_count = 0
+        page_duplicate_count = 0
 
         for listing_item in listing_items:
+            listing_external_id = _extract_listing_external_id(listing_item)
+
+            if (
+                listing_external_id is not None
+                and listing_external_id in seen_external_ids
+            ):
+                page_duplicate_count += 1
+                continue
+
             enriched_item = _enrich_listing_item(
                 listing_item,
                 detail_fetcher=detail_fetcher,
@@ -365,10 +407,7 @@ def scrape_estates_for(
                 voivodeship=voivodeship,
             )
 
-            if estate is not None:
-                estates.append(estate)
-                page_estates_count += 1
-            else:
+            if estate is None:
                 logger.warning(
                     "Skipping listing item without usable external id for "
                     "estate_type=%s voivodeship=%s page=%s",
@@ -376,43 +415,75 @@ def scrape_estates_for(
                     voivodeship,
                     page,
                 )
+                continue
+
+            if estate.external_id in seen_external_ids:
+                page_duplicate_count += 1
+                continue
+
+            seen_external_ids.add(estate.external_id)
+            page_estates_count += 1
+            total_estates_count += 1
+            yield estate
 
         logger.info(
             "Processed page %s for estate_type=%s voivodeship=%s: "
-            "items=%s estates=%s total=%s",
+            "items=%s estates=%s duplicates=%s total=%s",
             page,
             estate_type,
             voivodeship,
             len(listing_items),
             page_estates_count,
-            len(estates),
+            page_duplicate_count,
+            total_estates_count,
         )
 
+        if page_estates_count == 0:
+            logger.warning(
+                "Page %s for estate_type=%s voivodeship=%s contained no new "
+                "listings (duplicates=%s); stopping pagination",
+                page,
+                estate_type,
+                voivodeship,
+                page_duplicate_count,
+            )
+            break
+
     logger.info(
-        "Scraping finished for estate_type=%s voivodeship=%s total=%s",
+        "Streaming scrape finished for estate_type=%s voivodeship=%s total=%s",
         estate_type,
         voivodeship,
-        len(estates),
+        total_estates_count,
     )
 
-    return estates
 
-
-def scrape_estates(
+def iter_estates(
     *,
     estate_types: Iterable[str] = ESTATE_TYPES,
     voivodeships: Iterable[str] = VOIVODESHIPS,
     max_page: int = MAX_PAGE,
+    workers: int = 1,
     fetcher: Callable[[str], Mapping[str, Any]] = fetch_next_data_json,
     detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
-) -> list[Estate]:
-    """Scrapes listings for all requested estate types and voivodeships."""
-    estates: list[Estate] = []
+) -> Iterable[Estate]:
+    """Yields listings for all requested estate types and voivodeships."""
+    if workers > 1:
+        yield from iter_estates_threaded(
+            estate_types=estate_types,
+            voivodeships=voivodeships,
+            max_page=max_page,
+            workers=workers,
+            fetcher=fetcher,
+            detail_fetcher=detail_fetcher,
+        )
+        return
+
     selected_estate_types = tuple(sorted(estate_types))
     selected_voivodeships = tuple(sorted(voivodeships))
+    total_estates_count = 0
 
     logger.info(
-        "Scraping started for estate_types=%s voivodeships=%s max_page=%s",
+        "Streaming scrape started for estate_types=%s voivodeships=%s max_page=%s",
         ", ".join(selected_estate_types),
         ", ".join(selected_voivodeships),
         max_page,
@@ -420,15 +491,186 @@ def scrape_estates(
 
     for estate_type in selected_estate_types:
         for voivodeship in selected_voivodeships:
-            estates.extend(
-                scrape_estates_for(
-                    estate_type,
-                    voivodeship,
-                    max_page=max_page,
-                    fetcher=fetcher,
-                    detail_fetcher=detail_fetcher,
+            for estate in iter_estates_for(
+                estate_type,
+                voivodeship,
+                max_page=max_page,
+                fetcher=fetcher,
+                detail_fetcher=detail_fetcher,
+            ):
+                total_estates_count += 1
+                yield estate
+
+    logger.info(
+        "Streaming scrape finished for all filters total=%s", total_estates_count
+    )
+
+
+def iter_estates_threaded(
+    *,
+    estate_types: Iterable[str] = ESTATE_TYPES,
+    voivodeships: Iterable[str] = VOIVODESHIPS,
+    max_page: int = MAX_PAGE,
+    workers: int = 4,
+    fetcher: Callable[[str], Mapping[str, Any]] = fetch_next_data_json,
+    detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
+) -> Iterable[Estate]:
+    """Yields listings using worker threads split by filter combinations."""
+    if workers < 1:
+        raise ValueError("workers must be greater than or equal to 1")
+
+    selected_estate_types = tuple(sorted(estate_types))
+    selected_voivodeships = tuple(sorted(voivodeships))
+    scrape_targets = tuple(
+        (estate_type, voivodeship)
+        for estate_type in selected_estate_types
+        for voivodeship in selected_voivodeships
+    )
+
+    if not scrape_targets:
+        return
+
+    max_workers = min(workers, len(scrape_targets))
+    output_queue: queue.Queue[Estate | _WorkerFinished] = queue.Queue(
+        maxsize=max_workers * 100
+    )
+    total_estates_count = 0
+
+    logger.info(
+        "Threaded streaming scrape started: estate_types=%s voivodeships=%s "
+        "max_page=%s workers=%s active_workers=%s",
+        ", ".join(selected_estate_types),
+        ", ".join(selected_voivodeships),
+        max_page,
+        workers,
+        max_workers,
+    )
+
+    def scrape_target(estate_type: str, voivodeship: str) -> int:
+        count = 0
+
+        try:
+            for estate in iter_estates_for(
+                estate_type,
+                voivodeship,
+                max_page=max_page,
+                fetcher=fetcher,
+                detail_fetcher=detail_fetcher,
+            ):
+                output_queue.put(estate)
+                count += 1
+
+        except Exception as exc:
+            output_queue.put(
+                _WorkerFinished(
+                    estate_type=estate_type,
+                    voivodeship=voivodeship,
+                    count=count,
+                    error=exc,
                 )
             )
+            raise
+
+        output_queue.put(
+            _WorkerFinished(
+                estate_type=estate_type,
+                voivodeship=voivodeship,
+                count=count,
+            )
+        )
+        return count
+
+    with ThreadPoolExecutor(
+        max_workers=max_workers,
+        thread_name_prefix="estate-scraper",
+    ) as executor:
+        futures = [
+            executor.submit(scrape_target, estate_type, voivodeship)
+            for estate_type, voivodeship in scrape_targets
+        ]
+        remaining_targets = len(futures)
+
+        try:
+            while remaining_targets:
+                item = output_queue.get()
+
+                if isinstance(item, _WorkerFinished):
+                    remaining_targets -= 1
+
+                    if item.error is not None:
+                        for future in futures:
+                            future.cancel()
+
+                        logger.error(
+                            "Threaded scrape failed for estate_type=%s "
+                            "voivodeship=%s after %s records: %s",
+                            item.estate_type,
+                            item.voivodeship,
+                            item.count,
+                            item.error,
+                        )
+                        raise RuntimeError(
+                            "Threaded scrape failed for "
+                            f"estate_type={item.estate_type} "
+                            f"voivodeship={item.voivodeship}"
+                        ) from item.error
+
+                    logger.info(
+                        "Threaded scrape worker finished for estate_type=%s "
+                        "voivodeship=%s records=%s",
+                        item.estate_type,
+                        item.voivodeship,
+                        item.count,
+                    )
+                    continue
+
+                total_estates_count += 1
+                yield item
+
+        finally:
+            for future in futures:
+                future.cancel()
+
+        for future in futures:
+            future.result()
+
+    logger.info(
+        "Threaded streaming scrape finished for all filters total=%s",
+        total_estates_count,
+    )
+
+
+def scrape_estates(
+    *,
+    estate_types: Iterable[str] = ESTATE_TYPES,
+    voivodeships: Iterable[str] = VOIVODESHIPS,
+    max_page: int = MAX_PAGE,
+    workers: int = 1,
+    fetcher: Callable[[str], Mapping[str, Any]] = fetch_next_data_json,
+    detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
+) -> list[Estate]:
+    """Scrapes listings for all requested estate types and voivodeships."""
+    selected_estate_types = tuple(sorted(estate_types))
+    selected_voivodeships = tuple(sorted(voivodeships))
+
+    logger.info(
+        "Scraping started for estate_types=%s voivodeships=%s max_page=%s workers=%s",
+        ", ".join(selected_estate_types),
+        ", ".join(selected_voivodeships),
+        max_page,
+        workers,
+    )
+
+    estates = list(
+        iter_estates(
+            estate_types=selected_estate_types,
+            voivodeships=selected_voivodeships,
+            max_page=max_page,
+            workers=workers,
+            fetcher=fetcher,
+            detail_fetcher=detail_fetcher,
+        )
+    )
 
     logger.info("Scraping finished for all filters total=%s", len(estates))
 
@@ -486,6 +728,15 @@ def _merge_listing_with_detail(
             merged_item[key] = listing_item[key]
 
     return merged_item
+
+
+def _extract_listing_external_id(listing_item: Mapping[str, Any]) -> str | None:
+    return _as_text(
+        _first_direct_value(
+            listing_item,
+            ("id", "adId", "estateId", "externalId", "offerId"),
+        )
+    )
 
 
 def _get_nested_value(data: Mapping[str, Any], path: Sequence[str]) -> Any:

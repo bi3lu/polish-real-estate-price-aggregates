@@ -221,6 +221,7 @@ __marimo__/
 
 # Project data snapshots
 data/bronze/*.json
-data/silver/*.json
-data/gold/*.json
+data/bronze/*.jsonl
+data/silver/*.csv
+data/gold/*.csv
 *.db

@@ -30,12 +30,7 @@ def _read_env_file(env_file: Path = ENV_FILE) -> dict[str, str]:
 
 def normalize_url(url: str) -> str:
     """Normalizes project URLs loaded from environment-like sources."""
-    normalized_url = url.strip()
-
-    if normalized_url.startswith("ttps://"):
-        normalized_url = f"h{normalized_url}"
-
-    return normalized_url
+    return url.strip()
 
 
 def get_required_env_file_value(key: str) -> str:
@@ -51,5 +46,4 @@ def get_required_env_file_value(key: str) -> str:
 def get_env_file_value(key: str, default: str) -> str:
     env_file_vars = _read_env_file()
     raw_value = env_file_vars.get(key) or default
-
     return normalize_url(raw_value)

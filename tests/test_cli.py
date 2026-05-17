@@ -61,10 +61,11 @@ def test_run_cli_calls_scraper_with_selected_filters_and_prints_json() -> None:
             )
         ]
 
-    def saver(estates: list[Estate], **kwargs: Any) -> Path:
+    def saver(estates: list[Estate], **kwargs: Any) -> tuple[Path, int]:
+        estate_list = list(estates)
         captured_save_kwargs.update(kwargs)
-        captured_save_kwargs["estates"] = estates
-        return Path("data/bronze/estate_snapshot_test.json")
+        captured_save_kwargs["estates"] = estate_list
+        return Path("data/bronze/estate_snapshot_test.jsonl"), len(estate_list)
 
     exit_code = run_cli(
         [
@@ -94,7 +95,7 @@ def test_run_cli_calls_scraper_with_selected_filters_and_prints_json() -> None:
         "listing-1"
     ]
     assert json.loads(stdout.getvalue()) == {
-        "output_path": "data/bronze/estate_snapshot_test.json",
+        "output_path": "data/bronze/estate_snapshot_test.jsonl",
         "count": 1,
         "estate_types": ["mieszkanie"],
         "voivodeships": ["mazowieckie"],

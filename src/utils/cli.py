@@ -11,9 +11,9 @@ from typing import TextIO
 from src.config.env import get_required_env_file_value
 from src.config.globals import ESTATE_TYPES, MAX_PAGE, VOIVODESHIPS
 from src.models.estate import Estate
-from src.scraper.estate_scraper import scrape_estates
+from src.scraper.estate_scraper import iter_estates
 from src.utils.logger import get_logger
-from src.utils.storage import save_estates_to_bronze
+from src.utils.storage import stream_estates_to_bronze
 
 logger = get_logger(__name__)
 
@@ -26,8 +26,8 @@ class CliOptions:
     pretty: bool
 
 
-ScrapeFn = Callable[..., list[Estate]]
-SaveFn = Callable[..., Path]
+ScrapeFn = Callable[..., Iterable[Estate]]
+SaveFn = Callable[..., tuple[Path, int]]
 ValidateFn = Callable[[], None]
 
 
@@ -105,8 +105,8 @@ def _validate_required_runtime_env() -> None:
 def run_cli(
     args: Sequence[str] | None = None,
     *,
-    scraper: ScrapeFn = scrape_estates,
-    saver: SaveFn = save_estates_to_bronze,
+    scraper: ScrapeFn = iter_estates,
+    saver: SaveFn = stream_estates_to_bronze,
     validator: ValidateFn = _validate_required_runtime_env,
     stdout: TextIO = sys.stdout,
 ) -> int:
@@ -123,18 +123,17 @@ def run_cli(
         voivodeships=options.voivodeships,
         max_page=options.max_page,
     )
-    logger.info("Scraping returned %s estate records", len(estates))
-    output_path = saver(
+    output_path, count = saver(
         estates,
         estate_types=options.estate_types,
         voivodeships=options.voivodeships,
         max_page=options.max_page,
     )
-    logger.info("Bronze snapshot saved to %s", output_path)
+    logger.info("Bronze snapshot saved to %s with %s records", output_path, count)
     json.dump(
         {
             "output_path": str(output_path),
-            "count": len(estates),
+            "count": count,
             "estate_types": list(options.estate_types),
             "voivodeships": list(options.voivodeships),
         },

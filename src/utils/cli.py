@@ -16,6 +16,7 @@ from src.utils.logger import get_logger
 from src.utils.storage import stream_estates_to_bronze
 
 logger = get_logger(__name__)
+DEFAULT_WORKERS = 4
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,7 @@ class CliOptions:
     estate_types: tuple[str, ...]
     voivodeships: tuple[str, ...]
     max_page: int
+    workers: int
     pretty: bool
 
 
@@ -65,6 +67,16 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Maximum page to scrape per filter combination. Defaults to {MAX_PAGE}.",
     )
     parser.add_argument(
+        "--workers",
+        "--threads",
+        type=_positive_int,
+        default=DEFAULT_WORKERS,
+        help=(
+            "Number of worker threads used to scrape filter combinations. "
+            f"Defaults to {DEFAULT_WORKERS}."
+        ),
+    )
+    parser.add_argument(
         "--pretty",
         action="store_true",
         help="Pretty-print JSON output.",
@@ -90,6 +102,7 @@ def parse_cli_args(args: Sequence[str] | None = None) -> CliOptions:
                 argument_name="--voivodeship",
             ),
             max_page=namespace.max_page,
+            workers=namespace.workers,
             pretty=namespace.pretty,
         )
 
@@ -113,15 +126,17 @@ def run_cli(
     validator()
     options = parse_cli_args(args)
     logger.info(
-        "CLI run started: estate_types=%s voivodeships=%s max_page=%s",
+        "CLI run started: estate_types=%s voivodeships=%s max_page=%s workers=%s",
         ", ".join(options.estate_types),
         ", ".join(options.voivodeships),
         options.max_page,
+        options.workers,
     )
     estates = scraper(
         estate_types=options.estate_types,
         voivodeships=options.voivodeships,
         max_page=options.max_page,
+        workers=options.workers,
     )
     output_path, count = saver(
         estates,
@@ -136,6 +151,7 @@ def run_cli(
             "count": count,
             "estate_types": list(options.estate_types),
             "voivodeships": list(options.voivodeships),
+            "workers": options.workers,
         },
         stdout,
         ensure_ascii=False,

@@ -29,6 +29,7 @@ from src.config.globals import (
     ROOMS_NUM_MAP,
     SERVICE_SOURCE,
     VOIVODESHIPS,
+    RESUME_DUPLICATE_PAGE_STOP_THRESHOLD,
 )
 from src.models.estate import Estate
 from src.utils.logger import get_logger
@@ -326,6 +327,7 @@ def scrape_estates_for(
     max_page: int = MAX_PAGE,
     fetcher: Callable[[str], Mapping[str, Any]] = fetch_next_data_json,
     detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
+    existing_external_ids: Iterable[str] = (),
 ) -> list[Estate]:
     """Scrapes listings for a single estate type and voivodeship."""
     return list(
@@ -335,6 +337,7 @@ def scrape_estates_for(
             max_page=max_page,
             fetcher=fetcher,
             detail_fetcher=detail_fetcher,
+            existing_external_ids=existing_external_ids,
         )
     )
 
@@ -346,6 +349,7 @@ def iter_estates_for(
     max_page: int = MAX_PAGE,
     fetcher: Callable[[str], Mapping[str, Any]] = fetch_next_data_json,
     detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
+    existing_external_ids: Iterable[str] = (),
 ) -> Iterable[Estate]:
     """Yields listings for a single estate type and voivodeship."""
     if estate_type not in ESTATE_TYPES:
@@ -355,12 +359,21 @@ def iter_estates_for(
         raise ValueError(f"Unsupported voivodeship: {voivodeship}")
 
     total_estates_count = 0
-    seen_external_ids: set[str] = set()
+    seen_external_ids: set[str] = {
+        str(external_id) for external_id in existing_external_ids
+    }
+    existing_external_ids_count = len(seen_external_ids)
+    duplicate_only_page_count = 0
+    duplicate_page_stop_threshold = (
+        RESUME_DUPLICATE_PAGE_STOP_THRESHOLD if existing_external_ids_count else 1
+    )
     logger.info(
-        "Streaming scrape started for estate_type=%s voivodeship=%s max_page=%s",
+        "Streaming scrape started for estate_type=%s voivodeship=%s max_page=%s "
+        "existing_ids=%s",
         estate_type,
         voivodeship,
         max_page,
+        existing_external_ids_count,
     )
 
     for page in range(1, max_page + 1):
@@ -438,16 +451,47 @@ def iter_estates_for(
             total_estates_count,
         )
 
-        if page_estates_count == 0:
+        if page_estates_count > 0:
+            duplicate_only_page_count = 0
+            continue
+
+        if page_duplicate_count > 0:
+            duplicate_only_page_count += 1
+
+            if duplicate_only_page_count < duplicate_page_stop_threshold:
+                logger.info(
+                    "Page %s for estate_type=%s voivodeship=%s contained only "
+                    "duplicates (%s); continuing resume pagination "
+                    "(duplicate_only_pages=%s/%s)",
+                    page,
+                    estate_type,
+                    voivodeship,
+                    page_duplicate_count,
+                    duplicate_only_page_count,
+                    duplicate_page_stop_threshold,
+                )
+                continue
+
             logger.warning(
                 "Page %s for estate_type=%s voivodeship=%s contained no new "
-                "listings (duplicates=%s); stopping pagination",
+                "listings (duplicates=%s duplicate_only_pages=%s); stopping "
+                "pagination",
                 page,
                 estate_type,
                 voivodeship,
                 page_duplicate_count,
+                duplicate_only_page_count,
             )
             break
+
+        logger.warning(
+            "Page %s for estate_type=%s voivodeship=%s contained no usable "
+            "listings; stopping pagination",
+            page,
+            estate_type,
+            voivodeship,
+        )
+        break
 
     logger.info(
         "Streaming scrape finished for estate_type=%s voivodeship=%s total=%s",
@@ -465,6 +509,7 @@ def iter_estates(
     workers: int = 1,
     fetcher: Callable[[str], Mapping[str, Any]] = fetch_next_data_json,
     detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
+    existing_external_ids_by_voivodeship: Mapping[str, Iterable[str]] | None = None,
 ) -> Iterable[Estate]:
     """Yields listings for all requested estate types and voivodeships."""
     if workers > 1:
@@ -475,6 +520,7 @@ def iter_estates(
             workers=workers,
             fetcher=fetcher,
             detail_fetcher=detail_fetcher,
+            existing_external_ids_by_voivodeship=existing_external_ids_by_voivodeship,
         )
         return
 
@@ -497,6 +543,9 @@ def iter_estates(
                 max_page=max_page,
                 fetcher=fetcher,
                 detail_fetcher=detail_fetcher,
+                existing_external_ids=(
+                    existing_external_ids_by_voivodeship or {}
+                ).get(voivodeship, ()),
             ):
                 total_estates_count += 1
                 yield estate
@@ -514,6 +563,7 @@ def iter_estates_threaded(
     workers: int = 4,
     fetcher: Callable[[str], Mapping[str, Any]] = fetch_next_data_json,
     detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
+    existing_external_ids_by_voivodeship: Mapping[str, Iterable[str]] | None = None,
 ) -> Iterable[Estate]:
     """Yields listings using worker threads split by filter combinations."""
     if workers < 1:
@@ -556,6 +606,9 @@ def iter_estates_threaded(
                 max_page=max_page,
                 fetcher=fetcher,
                 detail_fetcher=detail_fetcher,
+                existing_external_ids=(
+                    existing_external_ids_by_voivodeship or {}
+                ).get(voivodeship, ()),
             ):
                 output_queue.put(estate)
                 count += 1
@@ -648,6 +701,7 @@ def scrape_estates(
     workers: int = 1,
     fetcher: Callable[[str], Mapping[str, Any]] = fetch_next_data_json,
     detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
+    existing_external_ids_by_voivodeship: Mapping[str, Iterable[str]] | None = None,
 ) -> list[Estate]:
     """Scrapes listings for all requested estate types and voivodeships."""
     selected_estate_types = tuple(sorted(estate_types))
@@ -669,6 +723,7 @@ def scrape_estates(
             workers=workers,
             fetcher=fetcher,
             detail_fetcher=detail_fetcher,
+            existing_external_ids_by_voivodeship=existing_external_ids_by_voivodeship,
         )
     )
 

@@ -6,6 +6,7 @@ import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 from typing import TextIO
 
 from src.config.env import get_required_env_file_value
@@ -15,6 +16,7 @@ from src.scraper.estate_scraper import iter_estates
 from src.utils.logger import get_logger
 from src.utils.storage import (
     load_bronze_external_ids_by_voivodeship,
+    load_bronze_page_checkpoints,
     stream_estates_to_bronze,
 )
 
@@ -34,6 +36,7 @@ ScrapeFn = Callable[..., Iterable[Estate]]
 SaveFn = Callable[..., tuple[Path, int]]
 ValidateFn = Callable[[], None]
 ExistingIdsLoaderFn = Callable[[], dict[str, set[str]]]
+PageCheckpointsLoaderFn = Callable[[], dict[str, dict[str, int]]]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -125,6 +128,7 @@ def run_cli(
     saver: SaveFn = stream_estates_to_bronze,
     validator: ValidateFn = _validate_required_runtime_env,
     existing_ids_loader: ExistingIdsLoaderFn = load_bronze_external_ids_by_voivodeship,
+    page_checkpoints_loader: PageCheckpointsLoaderFn = load_bronze_page_checkpoints,
     stdout: TextIO = sys.stdout,
 ) -> int:
     validator()
@@ -145,18 +149,39 @@ def run_cli(
         "Loaded %s existing bronze external ids for selected voivodeships",
         selected_existing_count,
     )
+    start_pages_by_target = page_checkpoints_loader()
+    page_checkpoints_by_voivodeship: dict[str, dict[str, int]] = {}
+    page_checkpoint_lock = Lock()
+
+    def progress_callback(
+        estate_type: str,
+        voivodeship: str,
+        page: int,
+    ) -> None:
+        with page_checkpoint_lock:
+            previous_page = page_checkpoints_by_voivodeship.get(voivodeship, {}).get(
+                estate_type,
+                0,
+            )
+            page_checkpoints_by_voivodeship.setdefault(voivodeship, {})[
+                estate_type
+            ] = max(previous_page, page)
+
     estates = scraper(
         estate_types=options.estate_types,
         voivodeships=options.voivodeships,
         max_page=options.max_page,
         workers=options.workers,
         existing_external_ids_by_voivodeship=existing_external_ids_by_voivodeship,
+        start_pages_by_target=start_pages_by_target,
+        progress_callback=progress_callback,
     )
     output_path, count = saver(
         estates,
         estate_types=options.estate_types,
         voivodeships=options.voivodeships,
         max_page=options.max_page,
+        page_checkpoints_by_voivodeship=page_checkpoints_by_voivodeship,
     )
     logger.info("Bronze snapshot saved to %s with %s records", output_path, count)
     json.dump(

@@ -45,6 +45,9 @@ class _WorkerFinished:
     error: Exception | None = None
 
 
+ScrapeProgressCallback = Callable[[str, str, int], None]
+
+
 class _NextDataHTMLParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -328,6 +331,8 @@ def scrape_estates_for(
     fetcher: Callable[[str], Mapping[str, Any]] = fetch_next_data_json,
     detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
     existing_external_ids: Iterable[str] = (),
+    start_page: int = 1,
+    progress_callback: ScrapeProgressCallback | None = None,
 ) -> list[Estate]:
     """Scrapes listings for a single estate type and voivodeship."""
     return list(
@@ -338,6 +343,8 @@ def scrape_estates_for(
             fetcher=fetcher,
             detail_fetcher=detail_fetcher,
             existing_external_ids=existing_external_ids,
+            start_page=start_page,
+            progress_callback=progress_callback,
         )
     )
 
@@ -350,6 +357,8 @@ def iter_estates_for(
     fetcher: Callable[[str], Mapping[str, Any]] = fetch_next_data_json,
     detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
     existing_external_ids: Iterable[str] = (),
+    start_page: int = 1,
+    progress_callback: ScrapeProgressCallback | None = None,
 ) -> Iterable[Estate]:
     """Yields listings for a single estate type and voivodeship."""
     if estate_type not in ESTATE_TYPES:
@@ -357,6 +366,9 @@ def iter_estates_for(
 
     if voivodeship not in VOIVODESHIPS:
         raise ValueError(f"Unsupported voivodeship: {voivodeship}")
+
+    if start_page < 1:
+        raise ValueError("start_page must be greater than or equal to 1")
 
     total_estates_count = 0
     seen_external_ids: set[str] = {
@@ -369,14 +381,15 @@ def iter_estates_for(
     )
     logger.info(
         "Streaming scrape started for estate_type=%s voivodeship=%s max_page=%s "
-        "existing_ids=%s",
+        "start_page=%s existing_ids=%s",
         estate_type,
         voivodeship,
         max_page,
+        start_page,
         existing_external_ids_count,
     )
 
-    for page in range(1, max_page + 1):
+    for page in range(start_page, max_page + 1):
         listing_url = build_listing_url(estate_type, voivodeship, page=page)
         logger.info(
             "Fetching listing page %s for estate_type=%s voivodeship=%s",
@@ -388,6 +401,12 @@ def iter_estates_for(
         listing_items = extract_listing_items(next_data_json)
 
         if not listing_items:
+            _mark_page_completed(
+                progress_callback,
+                estate_type=estate_type,
+                voivodeship=voivodeship,
+                page=page,
+            )
             logger.info(
                 "No listing items found on page %s for estate_type=%s "
                 "voivodeship=%s; stopping pagination",
@@ -450,6 +469,12 @@ def iter_estates_for(
             page_duplicate_count,
             total_estates_count,
         )
+        _mark_page_completed(
+            progress_callback,
+            estate_type=estate_type,
+            voivodeship=voivodeship,
+            page=page,
+        )
 
         if page_estates_count > 0:
             duplicate_only_page_count = 0
@@ -510,6 +535,8 @@ def iter_estates(
     fetcher: Callable[[str], Mapping[str, Any]] = fetch_next_data_json,
     detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
     existing_external_ids_by_voivodeship: Mapping[str, Iterable[str]] | None = None,
+    start_pages_by_target: Mapping[str, Mapping[str, int]] | None = None,
+    progress_callback: ScrapeProgressCallback | None = None,
 ) -> Iterable[Estate]:
     """Yields listings for all requested estate types and voivodeships."""
     if workers > 1:
@@ -521,6 +548,8 @@ def iter_estates(
             fetcher=fetcher,
             detail_fetcher=detail_fetcher,
             existing_external_ids_by_voivodeship=existing_external_ids_by_voivodeship,
+            start_pages_by_target=start_pages_by_target,
+            progress_callback=progress_callback,
         )
         return
 
@@ -546,6 +575,12 @@ def iter_estates(
                 existing_external_ids=(
                     existing_external_ids_by_voivodeship or {}
                 ).get(voivodeship, ()),
+                start_page=_target_start_page(
+                    start_pages_by_target,
+                    estate_type=estate_type,
+                    voivodeship=voivodeship,
+                ),
+                progress_callback=progress_callback,
             ):
                 total_estates_count += 1
                 yield estate
@@ -564,6 +599,8 @@ def iter_estates_threaded(
     fetcher: Callable[[str], Mapping[str, Any]] = fetch_next_data_json,
     detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
     existing_external_ids_by_voivodeship: Mapping[str, Iterable[str]] | None = None,
+    start_pages_by_target: Mapping[str, Mapping[str, int]] | None = None,
+    progress_callback: ScrapeProgressCallback | None = None,
 ) -> Iterable[Estate]:
     """Yields listings using worker threads split by filter combinations."""
     if workers < 1:
@@ -609,6 +646,12 @@ def iter_estates_threaded(
                 existing_external_ids=(
                     existing_external_ids_by_voivodeship or {}
                 ).get(voivodeship, ()),
+                start_page=_target_start_page(
+                    start_pages_by_target,
+                    estate_type=estate_type,
+                    voivodeship=voivodeship,
+                ),
+                progress_callback=progress_callback,
             ):
                 output_queue.put(estate)
                 count += 1
@@ -702,6 +745,8 @@ def scrape_estates(
     fetcher: Callable[[str], Mapping[str, Any]] = fetch_next_data_json,
     detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
     existing_external_ids_by_voivodeship: Mapping[str, Iterable[str]] | None = None,
+    start_pages_by_target: Mapping[str, Mapping[str, int]] | None = None,
+    progress_callback: ScrapeProgressCallback | None = None,
 ) -> list[Estate]:
     """Scrapes listings for all requested estate types and voivodeships."""
     selected_estate_types = tuple(sorted(estate_types))
@@ -724,12 +769,44 @@ def scrape_estates(
             fetcher=fetcher,
             detail_fetcher=detail_fetcher,
             existing_external_ids_by_voivodeship=existing_external_ids_by_voivodeship,
+            start_pages_by_target=start_pages_by_target,
+            progress_callback=progress_callback,
         )
     )
 
     logger.info("Scraping finished for all filters total=%s", len(estates))
 
     return estates
+
+
+def _target_start_page(
+    start_pages_by_target: Mapping[str, Mapping[str, int]] | None,
+    *,
+    estate_type: str,
+    voivodeship: str,
+) -> int:
+    if start_pages_by_target is None:
+        return 1
+
+    last_completed_page = start_pages_by_target.get(voivodeship, {}).get(estate_type)
+
+    if not isinstance(last_completed_page, int) or last_completed_page < 1:
+        return 1
+
+    return last_completed_page + 1
+
+
+def _mark_page_completed(
+    progress_callback: ScrapeProgressCallback | None,
+    *,
+    estate_type: str,
+    voivodeship: str,
+    page: int,
+) -> None:
+    if progress_callback is None:
+        return
+
+    progress_callback(estate_type, voivodeship, page)
 
 
 def _enrich_listing_item(

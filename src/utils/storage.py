@@ -54,10 +54,12 @@ def stream_estates_to_bronze(
     max_page: int,
     output_dir: Path = BRONZE_DATA_DIR,
     scraped_at: datetime | None = None,
+    page_checkpoints_by_voivodeship: dict[str, dict[str, int]] | None = None,
 ) -> tuple[Path, int]:
     snapshot_time = scraped_at or datetime.now(timezone.utc)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / _build_stream_manifest_filename()
+    existing_manifest = _load_stream_manifest(output_path)
     paths_by_voivodeship: dict[str, Path] = {}
     pending_records_by_voivodeship: dict[str, list[dict[str, Any]]] = {}
     new_counts_by_voivodeship: dict[str, int] = {}
@@ -149,6 +151,11 @@ def stream_estates_to_bronze(
         "max_page": max_page,
         "new_records_count": count,
         "duplicates_skipped": duplicate_count,
+        "page_checkpoints": _build_page_checkpoints(
+            existing_manifest.get("page_checkpoints"),
+            page_checkpoints_by_voivodeship,
+            updated_at=snapshot_time,
+        ),
         "files": {
             voivodeship: {
                 "path": str(path),
@@ -175,6 +182,19 @@ def stream_estates_to_bronze(
         raise caught_error
 
     return output_path, count
+
+
+def load_bronze_page_checkpoints(
+    bronze_dir: Path = BRONZE_DATA_DIR,
+) -> dict[str, dict[str, int]]:
+    """Loads last completed pages grouped by voivodeship and estate type."""
+    manifest = _load_stream_manifest(bronze_dir / _build_stream_manifest_filename())
+    checkpoints = manifest.get("page_checkpoints")
+
+    if not isinstance(checkpoints, dict):
+        return {}
+
+    return _extract_page_checkpoint_values(checkpoints)
 
 
 def load_bronze_external_ids_by_voivodeship(
@@ -204,6 +224,96 @@ def load_bronze_external_ids_by_voivodeship(
             external_ids.setdefault(str(voivodeship), set()).add(str(external_id))
 
     return external_ids
+
+
+def _load_stream_manifest(manifest_path: Path) -> dict[str, Any]:
+    if not manifest_path.exists():
+        return {}
+
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    except json.JSONDecodeError:
+        logger.warning("Could not parse bronze manifest %s", manifest_path)
+        return {}
+
+    if not isinstance(payload, dict):
+        return {}
+
+    return payload
+
+
+def _build_page_checkpoints(
+    existing_checkpoints: Any,
+    current_pages: dict[str, dict[str, int]] | None,
+    *,
+    updated_at: datetime,
+) -> dict[str, dict[str, dict[str, Any]]]:
+    merged_pages = _extract_page_checkpoint_values(existing_checkpoints)
+
+    for voivodeship, pages_by_estate_type in (current_pages or {}).items():
+        if not isinstance(pages_by_estate_type, dict):
+            continue
+
+        for estate_type, page in pages_by_estate_type.items():
+            if not isinstance(page, int) or page < 1:
+                continue
+
+            previous_page = merged_pages.get(voivodeship, {}).get(estate_type, 0)
+            merged_pages.setdefault(voivodeship, {})[estate_type] = max(
+                previous_page,
+                page,
+            )
+
+    updated_at_value = updated_at.isoformat()
+
+    return {
+        voivodeship: {
+            estate_type: {
+                "last_completed_page": page,
+                "next_page": page + 1,
+                "updated_at": updated_at_value,
+            }
+            for estate_type, page in sorted(pages_by_estate_type.items())
+        }
+        for voivodeship, pages_by_estate_type in sorted(merged_pages.items())
+    }
+
+
+def _extract_page_checkpoint_values(checkpoints: Any) -> dict[str, dict[str, int]]:
+    pages: dict[str, dict[str, int]] = {}
+
+    if not isinstance(checkpoints, dict):
+        return pages
+
+    for voivodeship, estate_type_checkpoints in checkpoints.items():
+        if not isinstance(voivodeship, str) or not isinstance(
+            estate_type_checkpoints,
+            dict,
+        ):
+            continue
+
+        for estate_type, checkpoint in estate_type_checkpoints.items():
+            if not isinstance(estate_type, str):
+                continue
+
+            page: int | None = None
+
+            if isinstance(checkpoint, int):
+                page = checkpoint
+
+            elif isinstance(checkpoint, dict):
+                raw_page = checkpoint.get("last_completed_page")
+
+                if isinstance(raw_page, int):
+                    page = raw_page
+
+            if page is None or page < 1:
+                continue
+
+            pages.setdefault(voivodeship, {})[estate_type] = page
+
+    return pages
 
 
 def _iter_bronze_estate_payloads(snapshot_path: Path) -> Iterable[dict[str, Any]]:

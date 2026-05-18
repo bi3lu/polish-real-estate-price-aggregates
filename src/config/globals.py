@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import TypeVar
 
 from src.config.env import PROJECT_ROOT, get_env_file_value
 
@@ -90,6 +91,7 @@ ADDITIONAL_FEATURES: frozenset[str] = frozenset(
 #######################################################################################
 
 MAX_PAGE: int = 1001
+RESUME_DUPLICATE_PAGE_STOP_THRESHOLD = 1001
 
 REQUEST_TIMEOUT_SECONDS: int = 30
 REQUEST_RETRIES: int = 3
@@ -120,6 +122,14 @@ HEADERS: dict[str, str] = {
 BRONZE_DATA_DIR: Path = PROJECT_ROOT / "data" / "bronze"
 SILVER_DATA_DIR: Path = PROJECT_ROOT / "data" / "silver"
 GOLD_DATA_DIR: Path = PROJECT_ROOT / "data" / "gold"
+PUBLIC_DATA_DIR: Path = PROJECT_ROOT / "data" / "public"
 
 NUMBER_RE = re.compile(r"\d+(?:[\s\u00a0]\d{3})*(?:[,.]\d+)?|\d+(?:[,.]\d+)?")
 LIST_SEPARATOR = "|"
+
+T = TypeVar("T")
+
+DEFAULT_WORKERS = 4
+DEFAULT_MIN_GROUP_SIZE = 10
+
+BRONZE_STREAM_CHECKPOINT_INTERVAL = 25

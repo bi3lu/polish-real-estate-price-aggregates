@@ -296,6 +296,105 @@ def test_scrape_estates_for_stops_after_duplicate_page() -> None:
     ]
 
 
+def test_scrape_estates_for_resume_continues_past_duplicate_pages() -> None:
+    requested_urls: list[str] = []
+
+    def fetcher(url: str) -> Mapping[str, Any]:
+        requested_urls.append(url)
+
+        if "page=1" in url:
+            listing_id = "already-seen"
+
+        elif "page=2" in url:
+            listing_id = "new-listing"
+
+        else:
+            return {"props": {"pageProps": {"data": {"searchAds": {"items": []}}}}}
+
+        return {
+            "props": {
+                "pageProps": {
+                    "data": {
+                        "searchAds": {
+                            "items": [
+                                {
+                                    "id": listing_id,
+                                    "title": f"Oferta {listing_id}",
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+
+    estates = scrape_estates_for(
+        "mieszkanie",
+        "mazowieckie",
+        max_page=3,
+        fetcher=fetcher,
+        detail_fetcher=None,
+        existing_external_ids={"already-seen"},
+    )
+
+    assert [estate.external_id for estate in estates] == ["new-listing"]
+    assert requested_urls == [
+        f"{MAIN_URL.rstrip('/')}/mieszkanie/mazowieckie?viewType=listing&page=1",
+        f"{MAIN_URL.rstrip('/')}/mieszkanie/mazowieckie?viewType=listing&page=2",
+        f"{MAIN_URL.rstrip('/')}/mieszkanie/mazowieckie?viewType=listing&page=3",
+    ]
+
+
+def test_scrape_estates_for_resumes_from_start_page_and_reports_progress() -> None:
+    requested_urls: list[str] = []
+    completed_pages: list[tuple[str, str, int]] = []
+
+    def fetcher(url: str) -> Mapping[str, Any]:
+        requested_urls.append(url)
+
+        if "page=8" in url:
+            return {"props": {"pageProps": {"data": {"searchAds": {"items": []}}}}}
+
+        return {
+            "props": {
+                "pageProps": {
+                    "data": {
+                        "searchAds": {
+                            "items": [
+                                {
+                                    "id": "new-listing",
+                                    "title": "Nowa oferta",
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+
+    estates = scrape_estates_for(
+        "mieszkanie",
+        "mazowieckie",
+        max_page=8,
+        fetcher=fetcher,
+        detail_fetcher=None,
+        start_page=7,
+        progress_callback=lambda estate_type, voivodeship, page: completed_pages.append(
+            (estate_type, voivodeship, page)
+        ),
+    )
+
+    assert [estate.external_id for estate in estates] == ["new-listing"]
+    assert requested_urls == [
+        f"{MAIN_URL.rstrip('/')}/mieszkanie/mazowieckie?viewType=listing&page=7",
+        f"{MAIN_URL.rstrip('/')}/mieszkanie/mazowieckie?viewType=listing&page=8",
+    ]
+    assert completed_pages == [
+        ("mieszkanie", "mazowieckie", 7),
+        ("mieszkanie", "mazowieckie", 8),
+    ]
+
+
 def test_iter_estates_supports_worker_threads() -> None:
     def fetcher(url: str) -> Mapping[str, Any]:
         if "page=2" in url:
@@ -340,6 +439,67 @@ def test_iter_estates_supports_worker_threads() -> None:
         ("mazowieckie", "mazowieckie-listing"),
         ("pomorskie", "pomorskie-listing"),
     ]
+
+
+def test_iter_estates_skips_existing_external_ids_before_detail_fetch() -> None:
+    detail_urls: list[str] = []
+
+    def fetcher(url: str) -> Mapping[str, Any]:
+        if "page=2" in url:
+            return {"props": {"pageProps": {"data": {"searchAds": {"items": []}}}}}
+
+        return {
+            "props": {
+                "pageProps": {
+                    "data": {
+                        "searchAds": {
+                            "items": [
+                                {
+                                    "id": "already-seen",
+                                    "title": "Stara oferta",
+                                    "href": "[lang]/ad/stara-oferta-ID4old",
+                                },
+                                {
+                                    "id": "new-listing",
+                                    "title": "Nowa oferta",
+                                    "href": "[lang]/ad/nowa-oferta-ID4new",
+                                },
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+
+    def detail_fetcher(url: str) -> Mapping[str, Any]:
+        detail_urls.append(url)
+        return {
+            "props": {
+                "pageProps": {
+                    "ad": {
+                        "id": "new-listing",
+                        "title": "Nowa oferta",
+                    }
+                }
+            }
+        }
+
+    estates = list(
+        iter_estates(
+            estate_types=("mieszkanie",),
+            voivodeships=("mazowieckie",),
+            max_page=2,
+            workers=1,
+            fetcher=fetcher,
+            detail_fetcher=detail_fetcher,
+            existing_external_ids_by_voivodeship={
+                "mazowieckie": {"already-seen"},
+            },
+        )
+    )
+
+    assert [estate.external_id for estate in estates] == ["new-listing"]
+    assert detail_urls == [f"{ESTATE_URL.rstrip('/')}/nowa-oferta-ID4new"]
 
 
 def test_scrape_estates_for_enriches_listing_with_detail_page() -> None:

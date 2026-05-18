@@ -83,6 +83,8 @@ def test_run_cli_calls_scraper_with_selected_filters_and_prints_json() -> None:
         scraper=scraper,
         saver=saver,
         validator=lambda: None,
+        existing_ids_loader=lambda: {},
+        page_checkpoints_loader=lambda: {},
         stdout=stdout,
     )
 
@@ -92,10 +94,14 @@ def test_run_cli_calls_scraper_with_selected_filters_and_prints_json() -> None:
         "voivodeships": ("mazowieckie",),
         "max_page": 2,
         "workers": 4,
+        "existing_external_ids_by_voivodeship": {},
+        "start_pages_by_target": {},
+        "progress_callback": captured_kwargs["progress_callback"],
     }
     assert captured_save_kwargs["estate_types"] == ("mieszkanie",)
     assert captured_save_kwargs["voivodeships"] == ("mazowieckie",)
     assert captured_save_kwargs["max_page"] == 2
+    assert captured_save_kwargs["page_checkpoints_by_voivodeship"] == {}
     assert [estate.external_id for estate in captured_save_kwargs["estates"]] == [
         "listing-1"
     ]

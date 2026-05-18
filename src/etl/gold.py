@@ -6,11 +6,11 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any
 
 from pydantic import ValidationError
 
-from src.config.globals import GOLD_DATA_DIR, SILVER_DATA_DIR
+from src.config.globals import GOLD_DATA_DIR, SILVER_DATA_DIR, T
 from src.models.gold_estate import (
     GoldDataQuality,
     GoldGeoAggregate,
@@ -21,8 +21,6 @@ from src.models.silver_estate import SilverEstate
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -630,8 +628,7 @@ def _percentile(values: list[float], percentile: float) -> float | None:
     upper_index = min(lower_index + 1, len(sorted_values) - 1)
     weight = position - lower_index
     result = (
-        sorted_values[lower_index] * (1 - weight)
-        + sorted_values[upper_index] * weight
+        sorted_values[lower_index] * (1 - weight) + sorted_values[upper_index] * weight
     )
 
     return round(result, 2)

@@ -10,7 +10,7 @@ from threading import Lock
 from typing import TextIO
 
 from src.config.env import get_required_env_file_value
-from src.config.globals import ESTATE_TYPES, MAX_PAGE, VOIVODESHIPS, DEFAULT_WORKERS
+from src.config.globals import DEFAULT_WORKERS, ESTATE_TYPES, MAX_PAGE, VOIVODESHIPS
 from src.models.estate import Estate
 from src.scraper.estate_scraper import iter_estates
 from src.utils.logger import get_logger
@@ -163,9 +163,9 @@ def run_cli(
                 estate_type,
                 0,
             )
-            page_checkpoints_by_voivodeship.setdefault(voivodeship, {})[
-                estate_type
-            ] = max(previous_page, page)
+            page_checkpoints_by_voivodeship.setdefault(voivodeship, {})[estate_type] = (
+                max(previous_page, page)
+            )
 
     estates = scraper(
         estate_types=options.estate_types,

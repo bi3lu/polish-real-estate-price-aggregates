@@ -160,9 +160,7 @@ def stream_estates_to_bronze(
             voivodeship: {
                 "path": str(path),
                 "new_records_count": new_counts_by_voivodeship.get(voivodeship, 0),
-                "total_records_count": len(
-                    seen_external_ids.get(voivodeship, set())
-                ),
+                "total_records_count": len(seen_external_ids.get(voivodeship, set())),
             }
             for voivodeship, path in sorted(paths_by_voivodeship.items())
         },
@@ -397,10 +395,13 @@ def _ensure_estate_jsonl_only(path: Path) -> None:
     temp_path = path.with_suffix(f"{path.suffix}.tmp")
     changed = False
 
-    with path.open(encoding="utf-8") as input_file, temp_path.open(
-        "w",
-        encoding="utf-8",
-    ) as output_file:
+    with (
+        path.open(encoding="utf-8") as input_file,
+        temp_path.open(
+            "w",
+            encoding="utf-8",
+        ) as output_file,
+    ):
         for line in input_file:
             stripped_line = line.strip()
 

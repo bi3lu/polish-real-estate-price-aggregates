@@ -26,10 +26,10 @@ from src.config.globals import (
     REQUEST_RETRIES,
     REQUEST_RETRY_SLEEP_SECONDS,
     REQUEST_TIMEOUT_SECONDS,
+    RESUME_DUPLICATE_PAGE_STOP_THRESHOLD,
     ROOMS_NUM_MAP,
     SERVICE_SOURCE,
     VOIVODESHIPS,
-    RESUME_DUPLICATE_PAGE_STOP_THRESHOLD,
 )
 from src.models.estate import Estate
 from src.utils.logger import get_logger
@@ -572,9 +572,9 @@ def iter_estates(
                 max_page=max_page,
                 fetcher=fetcher,
                 detail_fetcher=detail_fetcher,
-                existing_external_ids=(
-                    existing_external_ids_by_voivodeship or {}
-                ).get(voivodeship, ()),
+                existing_external_ids=(existing_external_ids_by_voivodeship or {}).get(
+                    voivodeship, ()
+                ),
                 start_page=_target_start_page(
                     start_pages_by_target,
                     estate_type=estate_type,
@@ -643,9 +643,9 @@ def iter_estates_threaded(
                 max_page=max_page,
                 fetcher=fetcher,
                 detail_fetcher=detail_fetcher,
-                existing_external_ids=(
-                    existing_external_ids_by_voivodeship or {}
-                ).get(voivodeship, ()),
+                existing_external_ids=(existing_external_ids_by_voivodeship or {}).get(
+                    voivodeship, ()
+                ),
                 start_page=_target_start_page(
                     start_pages_by_target,
                     estate_type=estate_type,

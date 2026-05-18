@@ -220,8 +220,7 @@ __marimo__/
 # Db files
 
 # Project data snapshots
-data/bronze/*.json
-data/bronze/*.jsonl
+data/bronze/
 data/silver/*.csv
 data/gold/*.csv
 *.db

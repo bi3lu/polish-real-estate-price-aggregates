@@ -145,10 +145,7 @@ def test_stream_estates_to_bronze_skips_existing_external_ids(
     assert manifest["duplicates_skipped"] == 1
     assert manifest["files"]["mazowieckie"]["new_records_count"] == 1
     assert all(line["record_type"] == "estate" for line in canonical_lines)
-    assert [
-        line["data"]["external_id"]
-        for line in canonical_lines
-    ] == [
+    assert [line["data"]["external_id"] for line in canonical_lines] == [
         "listing-1",
         "listing-2",
     ]

@@ -1,3 +1,5 @@
+"""Tests for command-line option parsing and CLI orchestration."""
+
 from __future__ import annotations
 
 import json

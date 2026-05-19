@@ -1,3 +1,5 @@
+"""Tests for silver-to-gold ETL transformations and outputs."""
+
 from __future__ import annotations
 
 import csv

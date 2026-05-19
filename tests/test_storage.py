@@ -1,3 +1,5 @@
+"""Tests for bronze snapshot storage and resume checkpoints."""
+
 from __future__ import annotations
 
 import json

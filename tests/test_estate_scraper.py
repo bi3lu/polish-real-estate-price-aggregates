@@ -1,3 +1,5 @@
+"""Tests for listing scraping, parsing, and resume behavior."""
+
 from __future__ import annotations
 
 from collections.abc import Mapping

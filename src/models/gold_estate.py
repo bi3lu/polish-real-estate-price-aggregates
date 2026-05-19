@@ -1,3 +1,5 @@
+"""Gold-layer models for analytics and machine-learning features."""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
@@ -52,7 +54,7 @@ class GoldListingFeature(BaseModel):
 
 
 class GoldGeoAggregate(BaseModel):
-    """Geo grain for map layers and local market comparison."""
+    """Geographic aggregate row for map layers and local market comparison."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -83,7 +85,7 @@ class GoldGeoAggregate(BaseModel):
 
 
 class GoldSegmentAggregate(BaseModel):
-    """Segment grain for dashboards and analytical slices."""
+    """Segment aggregate row for dashboards and analytical slices."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -112,7 +114,7 @@ class GoldSegmentAggregate(BaseModel):
 
 
 class GoldDataQuality(BaseModel):
-    """Dataset observability row for a single silver-to-gold run."""
+    """Dataset observability metric for a single silver-to-gold run."""
 
     model_config = ConfigDict(extra="forbid")
 

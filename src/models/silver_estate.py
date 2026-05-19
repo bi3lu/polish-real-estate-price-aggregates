@@ -1,10 +1,12 @@
+"""Normalized silver-layer data models."""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
 
 class SilverEstate(BaseModel):
-    """Flat normalized listing record for the silver CSV layer."""
+    """Flat normalized listing record stored in the silver CSV layer."""
 
     model_config = ConfigDict(extra="forbid")
 

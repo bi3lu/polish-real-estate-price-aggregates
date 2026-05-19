@@ -1,3 +1,5 @@
+"""Raw real estate listing models produced by the scraper."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -6,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class Estate(BaseModel):
-    """Snapshot of a real estate listing."""
+    """Snapshot of a single scraped real estate listing."""
 
     model_config = ConfigDict(extra="forbid")
 

@@ -1,3 +1,5 @@
+"""Silver-to-gold ETL transformations and aggregate builders."""
+
 from __future__ import annotations
 
 import csv
@@ -25,6 +27,8 @@ logger = get_logger(__name__)
 
 @dataclass(frozen=True)
 class GoldTables:
+    """Container for all gold-layer tables produced by the ETL stage."""
+
     ml_features: list[GoldListingFeature]
     geo_aggregates: list[GoldGeoAggregate]
     segment_aggregates: list[GoldSegmentAggregate]
@@ -33,6 +37,8 @@ class GoldTables:
 
 @dataclass(frozen=True)
 class GoldOutputPaths:
+    """Filesystem paths for written gold-layer CSV snapshots."""
+
     ml_features: Path
     geo_aggregates: Path
     segment_aggregates: Path
@@ -46,6 +52,18 @@ def run_silver_to_gold(
     gold_dir: Path = GOLD_DATA_DIR,
     processed_at: datetime | None = None,
 ) -> GoldOutputPaths:
+    """Run the silver-to-gold ETL stage.
+
+    Args:
+        silver_path: Optional explicit silver CSV path. When omitted, the latest
+            silver snapshot is selected from ``silver_dir``.
+        silver_dir: Directory containing silver CSV snapshots.
+        gold_dir: Directory where gold CSV snapshots are written.
+        processed_at: Optional timestamp used for deterministic outputs.
+
+    Returns:
+        Paths to all written gold CSV snapshots.
+    """
     selected_silver_path = silver_path or find_latest_silver_snapshot(silver_dir)
     snapshot_time = processed_at or datetime.now(timezone.utc)
     logger.info("Gold ETL started for silver snapshot %s", selected_silver_path)
@@ -72,6 +90,17 @@ def run_silver_to_gold(
 
 
 def find_latest_silver_snapshot(silver_dir: Path = SILVER_DATA_DIR) -> Path:
+    """Find the latest silver CSV snapshot.
+
+    Args:
+        silver_dir: Directory containing silver CSV files.
+
+    Returns:
+        Path to the most recent silver snapshot.
+
+    Raises:
+        FileNotFoundError: If the directory contains no silver snapshots.
+    """
     snapshots = sorted(silver_dir.glob("estate_silver_*.csv"))
 
     if not snapshots:
@@ -81,6 +110,14 @@ def find_latest_silver_snapshot(silver_dir: Path = SILVER_DATA_DIR) -> Path:
 
 
 def load_silver_snapshot(silver_path: Path) -> list[SilverEstate]:
+    """Load and validate silver records from a CSV snapshot.
+
+    Args:
+        silver_path: CSV file to load.
+
+    Returns:
+        Valid silver records. Invalid rows are skipped and logged.
+    """
     records: list[SilverEstate] = []
 
     with silver_path.open(encoding="utf-8", newline="") as input_file:
@@ -106,6 +143,15 @@ def transform_silver_records(
     *,
     processed_at: datetime | None = None,
 ) -> GoldTables:
+    """Transform silver records into gold feature, aggregate, and quality tables.
+
+    Args:
+        records: Silver records to transform.
+        processed_at: Optional processing timestamp for deterministic outputs.
+
+    Returns:
+        Grouped gold tables ready to be written to CSV.
+    """
     snapshot_time = processed_at or datetime.now(timezone.utc)
     processed_at_text = snapshot_time.isoformat()
     record_list = list(records)
@@ -136,6 +182,15 @@ def build_listing_feature(
     *,
     processed_at: str,
 ) -> GoldListingFeature:
+    """Build a model-ready gold feature row from one silver record.
+
+    Args:
+        record: Source silver listing record.
+        processed_at: ISO timestamp assigned to the output row.
+
+    Returns:
+        Enriched listing feature row.
+    """
     price_per_sqm, price_per_sqm_source = _resolve_price_per_sqm(record)
     total_monthly_cost = _sum_optional(record.price_pln, record.rent_pln)
     amenities = (
@@ -218,6 +273,15 @@ def build_geo_aggregates(
     *,
     processed_at: str,
 ) -> list[GoldGeoAggregate]:
+    """Build geographic aggregates from gold listing features.
+
+    Args:
+        records: Gold listing features to aggregate.
+        processed_at: ISO timestamp assigned to aggregate rows.
+
+    Returns:
+        Geographic aggregate rows sorted by aggregate key.
+    """
     return _aggregate_groups(
         records,
         key_fn=lambda record: (
@@ -239,6 +303,15 @@ def build_segment_aggregates(
     *,
     processed_at: str,
 ) -> list[GoldSegmentAggregate]:
+    """Build market segment aggregates from gold listing features.
+
+    Args:
+        records: Gold listing features to aggregate.
+        processed_at: ISO timestamp assigned to aggregate rows.
+
+    Returns:
+        Segment aggregate rows sorted by aggregate key.
+    """
     return _aggregate_groups(
         records,
         key_fn=lambda record: (
@@ -262,6 +335,15 @@ def build_data_quality(
     *,
     processed_at: str,
 ) -> list[GoldDataQuality]:
+    """Build data quality metrics for a gold ETL run.
+
+    Args:
+        records: Gold listing features to measure.
+        processed_at: ISO timestamp assigned to metric rows.
+
+    Returns:
+        Data quality metric rows.
+    """
     record_list = list(records)
     total = len(record_list)
 
@@ -311,6 +393,16 @@ def save_gold_tables(
     output_dir: Path = GOLD_DATA_DIR,
     processed_at: datetime | None = None,
 ) -> GoldOutputPaths:
+    """Write all gold tables to timestamped CSV snapshots.
+
+    Args:
+        tables: Gold tables to serialize.
+        output_dir: Directory where CSV snapshots are written.
+        processed_at: Optional timestamp used in output filenames.
+
+    Returns:
+        Paths to the written CSV files.
+    """
     snapshot_time = processed_at or datetime.now(timezone.utc)
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = snapshot_time.strftime("%Y%m%dT%H%M%S%fZ")

@@ -1,3 +1,5 @@
+"""Gold-to-public ETL transformations for anonymized public datasets."""
+
 from __future__ import annotations
 
 import csv
@@ -19,12 +21,16 @@ logger = get_logger(__name__)
 
 @dataclass(frozen=True)
 class PublicTables:
+    """Container for public feature and quality tables."""
+
     ml_features: list[PublicListingFeature]
     data_quality: list[PublicDataQuality]
 
 
 @dataclass(frozen=True)
 class PublicOutputPaths:
+    """Filesystem paths for written public CSV snapshots."""
+
     ml_features: Path
     data_quality: Path
 
@@ -37,6 +43,20 @@ def run_gold_to_public(
     min_group_size: int = DEFAULT_MIN_GROUP_SIZE,
     processed_at: datetime | None = None,
 ) -> PublicOutputPaths:
+    """Run the gold-to-public ETL stage.
+
+    Args:
+        gold_ml_features_path: Optional explicit gold ML feature CSV path. When
+            omitted, the latest file is selected from ``gold_dir``.
+        gold_dir: Directory containing gold CSV snapshots.
+        public_dir: Directory where public CSV snapshots are written.
+        min_group_size: Minimum group size required to expose city or grid
+            location fields.
+        processed_at: Optional timestamp used for deterministic outputs.
+
+    Returns:
+        Paths to the written public CSV snapshots.
+    """
     selected_gold_path = gold_ml_features_path or find_latest_gold_ml_features(gold_dir)
     snapshot_time = processed_at or datetime.now(timezone.utc)
     logger.info("Public ETL started for gold ML snapshot %s", selected_gold_path)
@@ -61,6 +81,17 @@ def run_gold_to_public(
 
 
 def find_latest_gold_ml_features(gold_dir: Path = GOLD_DATA_DIR) -> Path:
+    """Find the latest gold ML feature CSV snapshot.
+
+    Args:
+        gold_dir: Directory containing gold CSV files.
+
+    Returns:
+        Path to the latest gold ML features snapshot.
+
+    Raises:
+        FileNotFoundError: If no gold ML feature snapshots are present.
+    """
     snapshots = sorted(gold_dir.glob("estate_gold_ml_features_*.csv"))
 
     if not snapshots:
@@ -70,6 +101,14 @@ def find_latest_gold_ml_features(gold_dir: Path = GOLD_DATA_DIR) -> Path:
 
 
 def load_gold_ml_features(gold_ml_features_path: Path) -> list[GoldListingFeature]:
+    """Load and validate gold listing features from CSV.
+
+    Args:
+        gold_ml_features_path: CSV file to load.
+
+    Returns:
+        Valid gold listing feature rows. Invalid rows are skipped and logged.
+    """
     records: list[GoldListingFeature] = []
 
     with gold_ml_features_path.open(encoding="utf-8", newline="") as input_file:
@@ -96,6 +135,19 @@ def transform_gold_records_for_public(
     min_group_size: int = DEFAULT_MIN_GROUP_SIZE,
     processed_at: datetime | None = None,
 ) -> PublicTables:
+    """Transform gold listing features into anonymized public tables.
+
+    Args:
+        records: Gold listing feature records to transform.
+        min_group_size: Minimum count required to expose location detail.
+        processed_at: Optional processing timestamp for deterministic outputs.
+
+    Returns:
+        Public feature and data quality tables.
+
+    Raises:
+        ValueError: If ``min_group_size`` is lower than one.
+    """
     if min_group_size < 1:
         raise ValueError("min_group_size must be greater than or equal to 1")
 
@@ -133,6 +185,18 @@ def build_public_listing_feature(
     min_group_size: int = DEFAULT_MIN_GROUP_SIZE,
     processed_at: str,
 ) -> PublicListingFeature:
+    """Build one anonymized public feature row.
+
+    Args:
+        record: Source gold listing feature.
+        city_count: Number of records in the same city privacy group.
+        grid_count: Number of records in the same rounded coordinate group.
+        min_group_size: Minimum group size required to expose location detail.
+        processed_at: ISO timestamp assigned to the output row.
+
+    Returns:
+        Public feature row with sensitive fields generalized.
+    """
     lat_grid, lon_grid = _rounded_grid(record.latitude, record.longitude)
     keep_city = city_count >= min_group_size
     keep_grid = not keep_city and grid_count >= min_group_size
@@ -226,6 +290,17 @@ def build_public_data_quality(
     min_group_size: int,
     processed_at: str,
 ) -> list[PublicDataQuality]:
+    """Build data quality metrics for a public ETL run.
+
+    Args:
+        records: Public feature rows to measure.
+        source_records_count: Number of input gold records.
+        min_group_size: Privacy threshold used by the transformation.
+        processed_at: ISO timestamp assigned to metric rows.
+
+    Returns:
+        Public data quality metric rows.
+    """
     public_count = len(records)
 
     return [
@@ -283,6 +358,16 @@ def save_public_tables(
     output_dir: Path = PUBLIC_DATA_DIR,
     processed_at: datetime | None = None,
 ) -> PublicOutputPaths:
+    """Write public tables to timestamped CSV snapshots.
+
+    Args:
+        tables: Public tables to serialize.
+        output_dir: Directory where CSV snapshots are written.
+        processed_at: Optional timestamp used in output filenames.
+
+    Returns:
+        Paths to the written public CSV files.
+    """
     snapshot_time = processed_at or datetime.now(timezone.utc)
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = snapshot_time.strftime("%Y%m%dT%H%M%S%fZ")

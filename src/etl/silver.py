@@ -1,3 +1,5 @@
+"""Bronze-to-silver ETL transformations for real estate listings."""
+
 from __future__ import annotations
 
 import csv
@@ -28,6 +30,19 @@ def run_bronze_to_silver(
     silver_dir: Path = SILVER_DATA_DIR,
     processed_at: datetime | None = None,
 ) -> Path:
+    """Run the bronze-to-silver ETL stage.
+
+    Args:
+        bronze_path: Optional explicit bronze snapshot path. When omitted, the
+            latest available bronze snapshot is loaded from ``bronze_dir``.
+        bronze_dir: Directory containing bronze snapshots.
+        silver_dir: Directory where the silver CSV snapshot is written.
+        processed_at: Optional timestamp used for deterministic output names and
+            record metadata.
+
+    Returns:
+        Path to the written silver CSV snapshot.
+    """
     snapshot_time = processed_at or datetime.now(timezone.utc)
 
     if bronze_path is None:
@@ -57,6 +72,17 @@ def run_bronze_to_silver(
 
 
 def find_latest_bronze_snapshot(bronze_dir: Path = BRONZE_DATA_DIR) -> Path:
+    """Find the latest bronze snapshot or canonical manifest.
+
+    Args:
+        bronze_dir: Directory containing bronze snapshot files.
+
+    Returns:
+        Path to the latest bronze snapshot or manifest.
+
+    Raises:
+        FileNotFoundError: If no bronze snapshots are present.
+    """
     canonical_manifest = bronze_dir / "estate_snapshot_manifest.json"
 
     if canonical_manifest.exists():
@@ -81,6 +107,15 @@ def find_latest_bronze_snapshot(bronze_dir: Path = BRONZE_DATA_DIR) -> Path:
 def load_bronze_directory_snapshot(
     bronze_dir: Path = BRONZE_DATA_DIR,
 ) -> dict[str, Any]:
+    """Load a complete bronze directory as one snapshot payload.
+
+    Args:
+        bronze_dir: Directory containing canonical voivodeship snapshots or
+            legacy bronze snapshots.
+
+    Returns:
+        Bronze payload with merged metadata and listing data.
+    """
     snapshot_paths = _find_canonical_voivodeship_snapshots(bronze_dir)
 
     if not snapshot_paths:
@@ -170,6 +205,17 @@ def _latest_timestamp(first: str | None, second: str | None) -> str | None:
 
 
 def load_bronze_snapshot(bronze_path: Path) -> dict[str, Any]:
+    """Load a bronze snapshot from JSON, JSONL, or manifest format.
+
+    Args:
+        bronze_path: Snapshot file to load.
+
+    Returns:
+        Normalized bronze payload containing metadata and a ``data`` list.
+
+    Raises:
+        ValueError: If the snapshot root or JSONL rows have an unsupported shape.
+    """
     if bronze_path.suffix == ".jsonl":
         return _load_bronze_jsonl_snapshot(bronze_path)
 
@@ -271,6 +317,18 @@ def transform_bronze_payload(
     *,
     processed_at: datetime | None = None,
 ) -> list[SilverEstate]:
+    """Transform a bronze payload into normalized silver records.
+
+    Args:
+        bronze_payload: Bronze snapshot payload containing raw listing objects.
+        processed_at: Optional timestamp assigned to produced silver records.
+
+    Returns:
+        Deduplicated silver records keyed by source and external listing id.
+
+    Raises:
+        ValueError: If the bronze payload ``data`` field is not a list.
+    """
     raw_items = bronze_payload.get("data", [])
 
     if not isinstance(raw_items, list):
@@ -313,6 +371,18 @@ def normalize_estate(
     bronze_scraped_at: str | None = None,
     processed_at: datetime | None = None,
 ) -> SilverEstate | None:
+    """Normalize one raw estate listing into the silver schema.
+
+    Args:
+        estate: Raw listing model produced by the scraper.
+        bronze_scraped_at: Optional source scrape timestamp propagated from the
+            bronze snapshot.
+        processed_at: Optional processing timestamp for deterministic tests.
+
+    Returns:
+        A normalized silver record, or ``None`` when the listing has no usable
+        external id.
+    """
     snapshot_time = processed_at or datetime.now(timezone.utc)
     source = _normalize_slug(estate.source) or "estate_service"
     external_id = _normalize_text(estate.external_id)
@@ -450,6 +520,16 @@ def save_silver_snapshot(
     output_dir: Path = SILVER_DATA_DIR,
     processed_at: datetime | None = None,
 ) -> Path:
+    """Write silver records to a timestamped CSV snapshot.
+
+    Args:
+        records: Silver records to serialize.
+        output_dir: Directory where the CSV snapshot is written.
+        processed_at: Optional timestamp used in the output filename.
+
+    Returns:
+        Path to the written CSV file.
+    """
     snapshot_time = processed_at or datetime.now(timezone.utc)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / _build_silver_filename(snapshot_time)

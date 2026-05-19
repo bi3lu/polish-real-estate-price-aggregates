@@ -1,3 +1,5 @@
+"""Storage helpers for writing and resuming bronze real estate snapshots."""
+
 from __future__ import annotations
 
 import json
@@ -22,6 +24,19 @@ def save_estates_to_bronze(
     output_dir: Path = BRONZE_DATA_DIR,
     scraped_at: datetime | None = None,
 ) -> Path:
+    """Write estates to a single JSON bronze snapshot.
+
+    Args:
+        estates: Estate records to serialize.
+        estate_types: Estate type filters represented in the snapshot.
+        voivodeships: Voivodeship filters represented in the snapshot.
+        max_page: Maximum page used during scraping.
+        output_dir: Directory where the snapshot is written.
+        scraped_at: Optional scrape timestamp used in metadata and filename.
+
+    Returns:
+        Path to the written JSON snapshot.
+    """
     snapshot_time = scraped_at or datetime.now(timezone.utc)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / _build_snapshot_filename(snapshot_time)
@@ -56,6 +71,25 @@ def stream_estates_to_bronze(
     scraped_at: datetime | None = None,
     page_checkpoints_by_voivodeship: dict[str, dict[str, int]] | None = None,
 ) -> tuple[Path, int]:
+    """Stream estates into canonical per-voivodeship JSONL bronze files.
+
+    Args:
+        estates: Estate records to persist.
+        estate_types: Estate type filters represented in the manifest.
+        voivodeships: Voivodeship filters represented in the manifest.
+        max_page: Maximum page used during scraping.
+        output_dir: Directory where JSONL files and manifest are written.
+        scraped_at: Optional scrape timestamp used in manifest metadata.
+        page_checkpoints_by_voivodeship: Completed scrape pages to persist for
+            resume support.
+
+    Returns:
+        Tuple containing the manifest path and number of newly written records.
+
+    Raises:
+        BaseException: Re-raises any exception encountered while consuming the
+            estate iterable after flushing pending records.
+    """
     snapshot_time = scraped_at or datetime.now(timezone.utc)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / _build_stream_manifest_filename()
@@ -185,7 +219,14 @@ def stream_estates_to_bronze(
 def load_bronze_page_checkpoints(
     bronze_dir: Path = BRONZE_DATA_DIR,
 ) -> dict[str, dict[str, int]]:
-    """Loads last completed pages grouped by voivodeship and estate type."""
+    """Load last completed pages grouped by voivodeship and estate type.
+
+    Args:
+        bronze_dir: Directory containing the canonical bronze manifest.
+
+    Returns:
+        Last completed page numbers grouped by voivodeship and estate type.
+    """
     manifest = _load_stream_manifest(bronze_dir / _build_stream_manifest_filename())
     checkpoints = manifest.get("page_checkpoints")
 
@@ -198,7 +239,14 @@ def load_bronze_page_checkpoints(
 def load_bronze_external_ids_by_voivodeship(
     bronze_dir: Path = BRONZE_DATA_DIR,
 ) -> dict[str, set[str]]:
-    """Loads external ids already present in bronze snapshots grouped by voivodeship."""
+    """Load external ids already present in bronze snapshots.
+
+    Args:
+        bronze_dir: Directory containing bronze snapshots.
+
+    Returns:
+        External listing ids grouped by voivodeship.
+    """
     external_ids: dict[str, set[str]] = {}
 
     if not bronze_dir.exists():

@@ -1,10 +1,12 @@
+"""Public-facing models for anonymized real estate datasets."""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
 
 class PublicListingFeature(BaseModel):
-    """Privacy-preserving listing row for public ML datasets."""
+    """Privacy-preserving listing row for public machine-learning datasets."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -42,7 +44,7 @@ class PublicListingFeature(BaseModel):
 
 
 class PublicDataQuality(BaseModel):
-    """Observability metrics for a public anonymized dataset."""
+    """Observability metric for a public anonymized dataset."""
 
     model_config = ConfigDict(extra="forbid")
 

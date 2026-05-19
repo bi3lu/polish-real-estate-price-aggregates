@@ -1,3 +1,5 @@
+"""Command-line interface for scraping bronze real estate snapshots."""
+
 from __future__ import annotations
 
 import argparse
@@ -25,6 +27,8 @@ logger = get_logger(__name__)
 
 @dataclass(frozen=True)
 class CliOptions:
+    """Parsed command-line options for a scraper run."""
+
     estate_types: tuple[str, ...]
     voivodeships: tuple[str, ...]
     max_page: int
@@ -40,6 +44,11 @@ PageCheckpointsLoaderFn = Callable[[], dict[str, dict[str, int]]]
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the estate scraper argument parser.
+
+    Returns:
+        Configured argument parser.
+    """
     parser = argparse.ArgumentParser(
         prog="estate-scraper",
         description="Scrape real estate listings and save a bronze JSON snapshot.",
@@ -92,6 +101,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def parse_cli_args(args: Sequence[str] | None = None) -> CliOptions:
+    """Parse command-line arguments into typed options.
+
+    Args:
+        args: Optional argument sequence. When omitted, ``argparse`` reads from
+            the current process.
+
+    Returns:
+        Parsed CLI options.
+    """
     parser = build_parser()
     namespace = parser.parse_args(args)
 
@@ -117,6 +135,7 @@ def parse_cli_args(args: Sequence[str] | None = None) -> CliOptions:
 
 
 def _validate_required_runtime_env() -> None:
+    """Validate that runtime-only URL configuration is present."""
     get_required_env_file_value("MAIN_URL")
     get_required_env_file_value("ESTATE_URL")
 
@@ -131,6 +150,20 @@ def run_cli(
     page_checkpoints_loader: PageCheckpointsLoaderFn = load_bronze_page_checkpoints,
     stdout: TextIO = sys.stdout,
 ) -> int:
+    """Run the scraper CLI workflow.
+
+    Args:
+        args: Optional command-line arguments.
+        scraper: Callable that yields scraped estates.
+        saver: Callable that persists scraped estates.
+        validator: Callable that validates runtime configuration.
+        existing_ids_loader: Callable that loads already persisted listing ids.
+        page_checkpoints_loader: Callable that loads resume page checkpoints.
+        stdout: Text stream receiving the JSON command result.
+
+    Returns:
+        Process exit code.
+    """
     validator()
     options = parse_cli_args(args)
     logger.info(

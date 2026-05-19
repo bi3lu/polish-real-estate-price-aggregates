@@ -47,6 +47,66 @@ The public dataset is documented separately in
 
 Architecture and UML-style diagrams are available in [`docs/`](docs/README.md).
 
+## Example Insights
+
+The current public export contains 23,719 anonymized listings from selected
+voivodeships. It is a regional sample rather than a complete national market
+dataset, but it is large enough to demonstrate the analytical outputs produced
+by the pipeline.
+
+Example findings from the published public dataset:
+
+- Mazowieckie and Malopolskie have the highest median public price per square
+  meter in the sample, at about 14,100 PLN/sqm and 13,500 PLN/sqm respectively.
+- Apartments are priced much higher per square meter than houses in the sample:
+  median public price per square meter is about 14,300 PLN/sqm for apartments
+  versus 7,400 PLN/sqm for houses.
+- Studio apartments have the highest median price density at about
+  16,200 PLN/sqm, which is consistent with smaller units carrying a higher
+  price per square meter.
+- The public export keeps 99.33% of price targets, exposes public city labels
+  for 75.57% of records, and exposes generalized coordinate-grid locations for
+  13.26% of records after privacy filtering.
+
+Median public price per square meter by voivodeship:
+
+```mermaid
+xychart-beta
+  x-axis ["Mazowieckie", "Malopolskie", "Dolnoslaskie", "Opolskie"]
+  y-axis "PLN per sqm" 0 --> 16000
+  bar [14100, 13500, 7700, 6800]
+```
+
+Segment-level comparison:
+
+| Segment | Records | Median public price per sqm |
+| --- | ---: | ---: |
+| Studio apartments | 3,253 | 16,200 PLN |
+| Apartments | 10,385 | 14,300 PLN |
+| Houses | 10,079 | 7,400 PLN |
+
+Public dataset coverage summary:
+
+| Metric | Value |
+| --- | ---: |
+| Public records | 23,719 |
+| Records with public price target | 99.33% |
+| Records with public city | 75.57% |
+| Records with generalized geo grid | 13.26% |
+| Distinct public cities | 201 |
+
+Sample public rows:
+
+| Estate type | Voivodeship | Public city | Area bucket | Price bucket | Public target price per sqm |
+| --- | --- | --- | --- | --- | ---: |
+| `dom` | `dolnoslaskie` | `Wrocław` | `gte_150` | `gte_1_5m` | 11,800 PLN |
+| `dom` | `dolnoslaskie` | suppressed | `gte_150` | `gte_1_5m` | 7,400 PLN |
+| `mieszkanie` | `opolskie` | suppressed | `lt_35` | `lt_300k` | 3,900 PLN |
+
+The same outputs can be used for ranking local markets, comparing property
+segments, auditing missingness, preparing ML features, or publishing a
+privacy-aware dataset without exposing listing-level source identifiers.
+
 ## Features
 
 - CLI-based ingestion with configurable estate types, voivodeships, page limits,
@@ -223,6 +283,34 @@ Format code locally:
 uv run black .
 uv run isort .
 ```
+
+## Development Workflow
+
+The project was developed incrementally using feature branches and GitHub pull
+requests. Each milestone focused on a distinct layer of the data engineering
+workflow, and the finished work was merged into `main` with squash commits to
+keep the production history concise while preserving the pull request history as
+a readable record of the project's evolution.
+
+This workflow makes the repository easier to review in two complementary ways:
+`main` shows a clean release-oriented history, while the pull requests show how
+the implementation was planned, reviewed, and expanded over time.
+
+Key development milestones:
+
+- [#2](https://github.com/bi3lu/polish-real-estate-price-aggregates/pull/2) introduced the estate scraper, bronze-layer parsing, core data models,
+  environment configuration, CLI entry point, and initial tests.
+- [#3](https://github.com/bi3lu/polish-real-estate-price-aggregates/pull/3) added the silver ETL layer, threaded ingestion, normalized storage helpers,
+  duplicate handling, and broader test coverage.
+- [#4](https://github.com/bi3lu/polish-real-estate-price-aggregates/pull/4) added the gold ETL layer, analytical aggregates, checkpointing, improved CLI
+  controls, public dataset preparation, and CI refinements.
+- [#5](https://github.com/bi3lu/polish-real-estate-price-aggregates/pull/5) finalized documentation, public dataset metadata, repository cleanup, and
+  presentation polish before merging the completed development branch into
+  `main`.
+
+The branch and pull request history therefore documents the full path from an
+initial scraper prototype to a typed, tested, CI-backed data pipeline with
+bronze, silver, gold, and public export layers.
 
 ## Continuous Integration
 

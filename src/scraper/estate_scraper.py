@@ -26,6 +26,7 @@ from src.config.globals import (
     REQUEST_RETRIES,
     REQUEST_RETRY_SLEEP_SECONDS,
     REQUEST_TIMEOUT_SECONDS,
+    RESUME_DUPLICATE_PAGE_STOP_THRESHOLD,
     ROOMS_NUM_MAP,
     SERVICE_SOURCE,
     VOIVODESHIPS,
@@ -38,13 +39,20 @@ logger = get_logger(__name__)
 
 @dataclass(frozen=True)
 class _WorkerFinished:
+    """Completion marker emitted by threaded scraper workers."""
+
     estate_type: str
     voivodeship: str
     count: int
     error: Exception | None = None
 
 
+ScrapeProgressCallback = Callable[[str, str, int], None]
+
+
 class _NextDataHTMLParser(HTMLParser):
+    """HTML parser that extracts the Next.js ``__NEXT_DATA__`` script body."""
+
     def __init__(self) -> None:
         super().__init__()
         self._is_next_data = False
@@ -81,7 +89,20 @@ def build_listing_url(
     page: int = 1,
     main_url: str = MAIN_URL,
 ) -> str:
-    """Builds a listing URL for a sale search page."""
+    """Build a listing URL for a sale search page.
+
+    Args:
+        estate_type: Listing type slug.
+        voivodeship: Voivodeship slug.
+        page: One-based listing page number.
+        main_url: Base listing search URL.
+
+    Returns:
+        Fully qualified listing URL.
+
+    Raises:
+        ValueError: If ``page`` is lower than one.
+    """
     if page < 1:
         raise ValueError("page must be greater than or equal to 1")
 
@@ -93,7 +114,18 @@ def build_listing_url(
 
 
 def extract_next_data_from_html(html_content: str) -> dict[str, Any]:
-    """Extracts and parses Next.js data embedded in a page."""
+    """Extract and parse Next.js data embedded in an HTML page.
+
+    Args:
+        html_content: HTML response body.
+
+    Returns:
+        Parsed ``__NEXT_DATA__`` JSON object.
+
+    Raises:
+        ValueError: If the script is missing or the JSON root is not an object.
+        json.JSONDecodeError: If the embedded JSON cannot be parsed.
+    """
     parser = _NextDataHTMLParser()
     parser.feed(html_content)
 
@@ -116,7 +148,21 @@ def fetch_next_data_json(
     retries: int = REQUEST_RETRIES,
     retry_sleep_seconds: float = REQUEST_RETRY_SLEEP_SECONDS,
 ) -> dict[str, Any]:
-    """Fetches JSON data from a listing page."""
+    """Fetch JSON or embedded Next.js data from a page.
+
+    Args:
+        url: Page URL to request.
+        headers: HTTP request headers.
+        timeout_seconds: Socket timeout in seconds.
+        retries: Number of request attempts.
+        retry_sleep_seconds: Delay between failed attempts.
+
+    Returns:
+        Parsed JSON object from the response.
+
+    Raises:
+        RuntimeError: If all request attempts fail.
+    """
     last_error: BaseException | None = None
 
     for attempt in range(1, retries + 1):
@@ -177,7 +223,14 @@ def fetch_next_data_json(
 
 
 def extract_listing_items(next_data_json: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """Extracts listing items from Next.js data."""
+    """Extract listing item objects from known Next.js response shapes.
+
+    Args:
+        next_data_json: Parsed Next.js JSON payload.
+
+    Returns:
+        Listing item dictionaries, or an empty list when no supported path exists.
+    """
     item_paths = (
         ("props", "pageProps", "data", "searchAds", "items"),
         ("props", "pageProps", "searchAds", "items"),
@@ -199,7 +252,14 @@ def extract_listing_items(next_data_json: Mapping[str, Any]) -> list[dict[str, A
 
 
 def extract_estate_detail(next_data_json: Mapping[str, Any]) -> dict[str, Any] | None:
-    """Extracts a single listing detail object from Next.js data."""
+    """Extract a single listing detail object from known Next.js response shapes.
+
+    Args:
+        next_data_json: Parsed listing detail JSON payload.
+
+    Returns:
+        Detail object when present, otherwise ``None``.
+    """
     detail_paths = (
         ("props", "pageProps", "ad"),
         ("pageProps", "ad"),
@@ -220,7 +280,16 @@ def get_estate_info(
     estate_type: str | None = None,
     voivodeship: str | None = None,
 ) -> Estate | None:
-    """Extracts relevant details from a single listing item."""
+    """Extract normalized estate details from a listing payload.
+
+    Args:
+        estate_data: Raw listing or detail payload.
+        estate_type: Optional estate type assigned from the scrape target.
+        voivodeship: Optional voivodeship assigned from the scrape target.
+
+    Returns:
+        Estate model, or ``None`` when no stable external id can be derived.
+    """
     if not isinstance(estate_data, Mapping):
         return None
 
@@ -326,8 +395,25 @@ def scrape_estates_for(
     max_page: int = MAX_PAGE,
     fetcher: Callable[[str], Mapping[str, Any]] = fetch_next_data_json,
     detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
+    existing_external_ids: Iterable[str] = (),
+    start_page: int = 1,
+    progress_callback: ScrapeProgressCallback | None = None,
 ) -> list[Estate]:
-    """Scrapes listings for a single estate type and voivodeship."""
+    """Scrape listings for a single estate type and voivodeship.
+
+    Args:
+        estate_type: Estate type slug.
+        voivodeship: Voivodeship slug.
+        max_page: Highest listing page to request.
+        fetcher: Callable used to fetch listing pages.
+        detail_fetcher: Optional callable used to fetch listing detail pages.
+        existing_external_ids: Existing ids skipped during resume.
+        start_page: First page to scrape.
+        progress_callback: Optional callback invoked after each completed page.
+
+    Returns:
+        Scraped estate records.
+    """
     return list(
         iter_estates_for(
             estate_type,
@@ -335,6 +421,9 @@ def scrape_estates_for(
             max_page=max_page,
             fetcher=fetcher,
             detail_fetcher=detail_fetcher,
+            existing_external_ids=existing_external_ids,
+            start_page=start_page,
+            progress_callback=progress_callback,
         )
     )
 
@@ -346,24 +435,57 @@ def iter_estates_for(
     max_page: int = MAX_PAGE,
     fetcher: Callable[[str], Mapping[str, Any]] = fetch_next_data_json,
     detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
+    existing_external_ids: Iterable[str] = (),
+    start_page: int = 1,
+    progress_callback: ScrapeProgressCallback | None = None,
 ) -> Iterable[Estate]:
-    """Yields listings for a single estate type and voivodeship."""
+    """Yield listings for a single estate type and voivodeship.
+
+    Args:
+        estate_type: Estate type slug.
+        voivodeship: Voivodeship slug.
+        max_page: Highest listing page to request.
+        fetcher: Callable used to fetch listing pages.
+        detail_fetcher: Optional callable used to fetch listing detail pages.
+        existing_external_ids: Existing ids skipped during resume.
+        start_page: First page to scrape.
+        progress_callback: Optional callback invoked after each completed page.
+
+    Yields:
+        Estate records discovered on listing pages.
+
+    Raises:
+        ValueError: If filters or ``start_page`` are invalid.
+    """
     if estate_type not in ESTATE_TYPES:
         raise ValueError(f"Unsupported estate type: {estate_type}")
 
     if voivodeship not in VOIVODESHIPS:
         raise ValueError(f"Unsupported voivodeship: {voivodeship}")
 
+    if start_page < 1:
+        raise ValueError("start_page must be greater than or equal to 1")
+
     total_estates_count = 0
-    seen_external_ids: set[str] = set()
+    seen_external_ids: set[str] = {
+        str(external_id) for external_id in existing_external_ids
+    }
+    existing_external_ids_count = len(seen_external_ids)
+    duplicate_only_page_count = 0
+    duplicate_page_stop_threshold = (
+        RESUME_DUPLICATE_PAGE_STOP_THRESHOLD if existing_external_ids_count else 1
+    )
     logger.info(
-        "Streaming scrape started for estate_type=%s voivodeship=%s max_page=%s",
+        "Streaming scrape started for estate_type=%s voivodeship=%s max_page=%s "
+        "start_page=%s existing_ids=%s",
         estate_type,
         voivodeship,
         max_page,
+        start_page,
+        existing_external_ids_count,
     )
 
-    for page in range(1, max_page + 1):
+    for page in range(start_page, max_page + 1):
         listing_url = build_listing_url(estate_type, voivodeship, page=page)
         logger.info(
             "Fetching listing page %s for estate_type=%s voivodeship=%s",
@@ -375,6 +497,12 @@ def iter_estates_for(
         listing_items = extract_listing_items(next_data_json)
 
         if not listing_items:
+            _mark_page_completed(
+                progress_callback,
+                estate_type=estate_type,
+                voivodeship=voivodeship,
+                page=page,
+            )
             logger.info(
                 "No listing items found on page %s for estate_type=%s "
                 "voivodeship=%s; stopping pagination",
@@ -437,17 +565,54 @@ def iter_estates_for(
             page_duplicate_count,
             total_estates_count,
         )
+        _mark_page_completed(
+            progress_callback,
+            estate_type=estate_type,
+            voivodeship=voivodeship,
+            page=page,
+        )
 
-        if page_estates_count == 0:
+        if page_estates_count > 0:
+            duplicate_only_page_count = 0
+            continue
+
+        if page_duplicate_count > 0:
+            duplicate_only_page_count += 1
+
+            if duplicate_only_page_count < duplicate_page_stop_threshold:
+                logger.info(
+                    "Page %s for estate_type=%s voivodeship=%s contained only "
+                    "duplicates (%s); continuing resume pagination "
+                    "(duplicate_only_pages=%s/%s)",
+                    page,
+                    estate_type,
+                    voivodeship,
+                    page_duplicate_count,
+                    duplicate_only_page_count,
+                    duplicate_page_stop_threshold,
+                )
+                continue
+
             logger.warning(
                 "Page %s for estate_type=%s voivodeship=%s contained no new "
-                "listings (duplicates=%s); stopping pagination",
+                "listings (duplicates=%s duplicate_only_pages=%s); stopping "
+                "pagination",
                 page,
                 estate_type,
                 voivodeship,
                 page_duplicate_count,
+                duplicate_only_page_count,
             )
             break
+
+        logger.warning(
+            "Page %s for estate_type=%s voivodeship=%s contained no usable "
+            "listings; stopping pagination",
+            page,
+            estate_type,
+            voivodeship,
+        )
+        break
 
     logger.info(
         "Streaming scrape finished for estate_type=%s voivodeship=%s total=%s",
@@ -465,8 +630,27 @@ def iter_estates(
     workers: int = 1,
     fetcher: Callable[[str], Mapping[str, Any]] = fetch_next_data_json,
     detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
+    existing_external_ids_by_voivodeship: Mapping[str, Iterable[str]] | None = None,
+    start_pages_by_target: Mapping[str, Mapping[str, int]] | None = None,
+    progress_callback: ScrapeProgressCallback | None = None,
 ) -> Iterable[Estate]:
-    """Yields listings for all requested estate types and voivodeships."""
+    """Yield listings for all requested estate type and voivodeship combinations.
+
+    Args:
+        estate_types: Estate type slugs to scrape.
+        voivodeships: Voivodeship slugs to scrape.
+        max_page: Highest listing page to request for each target.
+        workers: Number of worker threads. Values above one use threaded mode.
+        fetcher: Callable used to fetch listing pages.
+        detail_fetcher: Optional callable used to fetch listing detail pages.
+        existing_external_ids_by_voivodeship: Existing ids grouped by voivodeship.
+        start_pages_by_target: Last completed pages grouped by voivodeship and
+            estate type.
+        progress_callback: Optional callback invoked after each completed page.
+
+    Yields:
+        Estate records for all requested targets.
+    """
     if workers > 1:
         yield from iter_estates_threaded(
             estate_types=estate_types,
@@ -475,6 +659,9 @@ def iter_estates(
             workers=workers,
             fetcher=fetcher,
             detail_fetcher=detail_fetcher,
+            existing_external_ids_by_voivodeship=existing_external_ids_by_voivodeship,
+            start_pages_by_target=start_pages_by_target,
+            progress_callback=progress_callback,
         )
         return
 
@@ -497,6 +684,15 @@ def iter_estates(
                 max_page=max_page,
                 fetcher=fetcher,
                 detail_fetcher=detail_fetcher,
+                existing_external_ids=(existing_external_ids_by_voivodeship or {}).get(
+                    voivodeship, ()
+                ),
+                start_page=_target_start_page(
+                    start_pages_by_target,
+                    estate_type=estate_type,
+                    voivodeship=voivodeship,
+                ),
+                progress_callback=progress_callback,
             ):
                 total_estates_count += 1
                 yield estate
@@ -514,8 +710,31 @@ def iter_estates_threaded(
     workers: int = 4,
     fetcher: Callable[[str], Mapping[str, Any]] = fetch_next_data_json,
     detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
+    existing_external_ids_by_voivodeship: Mapping[str, Iterable[str]] | None = None,
+    start_pages_by_target: Mapping[str, Mapping[str, int]] | None = None,
+    progress_callback: ScrapeProgressCallback | None = None,
 ) -> Iterable[Estate]:
-    """Yields listings using worker threads split by filter combinations."""
+    """Yield listings using worker threads split by filter combinations.
+
+    Args:
+        estate_types: Estate type slugs to scrape.
+        voivodeships: Voivodeship slugs to scrape.
+        max_page: Highest listing page to request for each target.
+        workers: Requested number of worker threads.
+        fetcher: Callable used to fetch listing pages.
+        detail_fetcher: Optional callable used to fetch listing detail pages.
+        existing_external_ids_by_voivodeship: Existing ids grouped by voivodeship.
+        start_pages_by_target: Last completed pages grouped by voivodeship and
+            estate type.
+        progress_callback: Optional callback invoked after each completed page.
+
+    Yields:
+        Estate records emitted by worker threads.
+
+    Raises:
+        ValueError: If ``workers`` is lower than one.
+        RuntimeError: If a worker fails while scraping a target.
+    """
     if workers < 1:
         raise ValueError("workers must be greater than or equal to 1")
 
@@ -556,6 +775,15 @@ def iter_estates_threaded(
                 max_page=max_page,
                 fetcher=fetcher,
                 detail_fetcher=detail_fetcher,
+                existing_external_ids=(existing_external_ids_by_voivodeship or {}).get(
+                    voivodeship, ()
+                ),
+                start_page=_target_start_page(
+                    start_pages_by_target,
+                    estate_type=estate_type,
+                    voivodeship=voivodeship,
+                ),
+                progress_callback=progress_callback,
             ):
                 output_queue.put(estate)
                 count += 1
@@ -648,8 +876,27 @@ def scrape_estates(
     workers: int = 1,
     fetcher: Callable[[str], Mapping[str, Any]] = fetch_next_data_json,
     detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
+    existing_external_ids_by_voivodeship: Mapping[str, Iterable[str]] | None = None,
+    start_pages_by_target: Mapping[str, Mapping[str, int]] | None = None,
+    progress_callback: ScrapeProgressCallback | None = None,
 ) -> list[Estate]:
-    """Scrapes listings for all requested estate types and voivodeships."""
+    """Scrape listings for all requested estate type and voivodeship combinations.
+
+    Args:
+        estate_types: Estate type slugs to scrape.
+        voivodeships: Voivodeship slugs to scrape.
+        max_page: Highest listing page to request for each target.
+        workers: Number of worker threads.
+        fetcher: Callable used to fetch listing pages.
+        detail_fetcher: Optional callable used to fetch listing detail pages.
+        existing_external_ids_by_voivodeship: Existing ids grouped by voivodeship.
+        start_pages_by_target: Last completed pages grouped by voivodeship and
+            estate type.
+        progress_callback: Optional callback invoked after each completed page.
+
+    Returns:
+        Scraped estate records.
+    """
     selected_estate_types = tuple(sorted(estate_types))
     selected_voivodeships = tuple(sorted(voivodeships))
 
@@ -669,12 +916,45 @@ def scrape_estates(
             workers=workers,
             fetcher=fetcher,
             detail_fetcher=detail_fetcher,
+            existing_external_ids_by_voivodeship=existing_external_ids_by_voivodeship,
+            start_pages_by_target=start_pages_by_target,
+            progress_callback=progress_callback,
         )
     )
 
     logger.info("Scraping finished for all filters total=%s", len(estates))
 
     return estates
+
+
+def _target_start_page(
+    start_pages_by_target: Mapping[str, Mapping[str, int]] | None,
+    *,
+    estate_type: str,
+    voivodeship: str,
+) -> int:
+    if start_pages_by_target is None:
+        return 1
+
+    last_completed_page = start_pages_by_target.get(voivodeship, {}).get(estate_type)
+
+    if not isinstance(last_completed_page, int) or last_completed_page < 1:
+        return 1
+
+    return last_completed_page + 1
+
+
+def _mark_page_completed(
+    progress_callback: ScrapeProgressCallback | None,
+    *,
+    estate_type: str,
+    voivodeship: str,
+    page: int,
+) -> None:
+    if progress_callback is None:
+        return
+
+    progress_callback(estate_type, voivodeship, page)
 
 
 def _enrich_listing_item(

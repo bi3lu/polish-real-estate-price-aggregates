@@ -1,1 +1,1 @@
-"""ETL modules for silver and gold data layers."""
+"""ETL stages for bronze, silver, gold, and public datasets."""

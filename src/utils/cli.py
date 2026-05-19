@@ -1,3 +1,5 @@
+"""Command-line interface for scraping bronze real estate snapshots."""
+
 from __future__ import annotations
 
 import argparse
@@ -6,21 +8,27 @@ import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 from typing import TextIO
 
 from src.config.env import get_required_env_file_value
-from src.config.globals import ESTATE_TYPES, MAX_PAGE, VOIVODESHIPS
+from src.config.globals import DEFAULT_WORKERS, ESTATE_TYPES, MAX_PAGE, VOIVODESHIPS
 from src.models.estate import Estate
 from src.scraper.estate_scraper import iter_estates
 from src.utils.logger import get_logger
-from src.utils.storage import stream_estates_to_bronze
+from src.utils.storage import (
+    load_bronze_external_ids_by_voivodeship,
+    load_bronze_page_checkpoints,
+    stream_estates_to_bronze,
+)
 
 logger = get_logger(__name__)
-DEFAULT_WORKERS = 4
 
 
 @dataclass(frozen=True)
 class CliOptions:
+    """Parsed command-line options for a scraper run."""
+
     estate_types: tuple[str, ...]
     voivodeships: tuple[str, ...]
     max_page: int
@@ -31,9 +39,16 @@ class CliOptions:
 ScrapeFn = Callable[..., Iterable[Estate]]
 SaveFn = Callable[..., tuple[Path, int]]
 ValidateFn = Callable[[], None]
+ExistingIdsLoaderFn = Callable[[], dict[str, set[str]]]
+PageCheckpointsLoaderFn = Callable[[], dict[str, dict[str, int]]]
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the estate scraper argument parser.
+
+    Returns:
+        Configured argument parser.
+    """
     parser = argparse.ArgumentParser(
         prog="estate-scraper",
         description="Scrape real estate listings and save a bronze JSON snapshot.",
@@ -86,6 +101,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def parse_cli_args(args: Sequence[str] | None = None) -> CliOptions:
+    """Parse command-line arguments into typed options.
+
+    Args:
+        args: Optional argument sequence. When omitted, ``argparse`` reads from
+            the current process.
+
+    Returns:
+        Parsed CLI options.
+    """
     parser = build_parser()
     namespace = parser.parse_args(args)
 
@@ -111,6 +135,7 @@ def parse_cli_args(args: Sequence[str] | None = None) -> CliOptions:
 
 
 def _validate_required_runtime_env() -> None:
+    """Validate that runtime-only URL configuration is present."""
     get_required_env_file_value("MAIN_URL")
     get_required_env_file_value("ESTATE_URL")
 
@@ -121,8 +146,24 @@ def run_cli(
     scraper: ScrapeFn = iter_estates,
     saver: SaveFn = stream_estates_to_bronze,
     validator: ValidateFn = _validate_required_runtime_env,
+    existing_ids_loader: ExistingIdsLoaderFn = load_bronze_external_ids_by_voivodeship,
+    page_checkpoints_loader: PageCheckpointsLoaderFn = load_bronze_page_checkpoints,
     stdout: TextIO = sys.stdout,
 ) -> int:
+    """Run the scraper CLI workflow.
+
+    Args:
+        args: Optional command-line arguments.
+        scraper: Callable that yields scraped estates.
+        saver: Callable that persists scraped estates.
+        validator: Callable that validates runtime configuration.
+        existing_ids_loader: Callable that loads already persisted listing ids.
+        page_checkpoints_loader: Callable that loads resume page checkpoints.
+        stdout: Text stream receiving the JSON command result.
+
+    Returns:
+        Process exit code.
+    """
     validator()
     options = parse_cli_args(args)
     logger.info(
@@ -132,17 +173,48 @@ def run_cli(
         options.max_page,
         options.workers,
     )
+    existing_external_ids_by_voivodeship = existing_ids_loader()
+    selected_existing_count = sum(
+        len(existing_external_ids_by_voivodeship.get(voivodeship, set()))
+        for voivodeship in options.voivodeships
+    )
+    logger.info(
+        "Loaded %s existing bronze external ids for selected voivodeships",
+        selected_existing_count,
+    )
+    start_pages_by_target = page_checkpoints_loader()
+    page_checkpoints_by_voivodeship: dict[str, dict[str, int]] = {}
+    page_checkpoint_lock = Lock()
+
+    def progress_callback(
+        estate_type: str,
+        voivodeship: str,
+        page: int,
+    ) -> None:
+        with page_checkpoint_lock:
+            previous_page = page_checkpoints_by_voivodeship.get(voivodeship, {}).get(
+                estate_type,
+                0,
+            )
+            page_checkpoints_by_voivodeship.setdefault(voivodeship, {})[estate_type] = (
+                max(previous_page, page)
+            )
+
     estates = scraper(
         estate_types=options.estate_types,
         voivodeships=options.voivodeships,
         max_page=options.max_page,
         workers=options.workers,
+        existing_external_ids_by_voivodeship=existing_external_ids_by_voivodeship,
+        start_pages_by_target=start_pages_by_target,
+        progress_callback=progress_callback,
     )
     output_path, count = saver(
         estates,
         estate_types=options.estate_types,
         voivodeships=options.voivodeships,
         max_page=options.max_page,
+        page_checkpoints_by_voivodeship=page_checkpoints_by_voivodeship,
     )
     logger.info("Bronze snapshot saved to %s with %s records", output_path, count)
     json.dump(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import TypeVar
 
 from src.config.env import PROJECT_ROOT, get_env_file_value
 
@@ -12,6 +13,10 @@ from src.config.env import PROJECT_ROOT, get_env_file_value
 #######################################################################################
 
 SERVICE_SOURCE: str = get_env_file_value("SERVICE_SOURCE", "estate_service")
+
+#######################################################################################
+# Estate normalization maps:
+#######################################################################################
 
 ROOMS_NUM_MAP: dict[str, int] = {
     "ONE": 1,
@@ -44,6 +49,10 @@ FLOOR_MAP: dict[str, int] = {
     "FOURTEENTH": 14,
     "FIFTEENTH": 15,
 }
+
+#######################################################################################
+# Estate filters and feature groups:
+#######################################################################################
 
 VOIVODESHIPS: frozenset[str] = frozenset(
     {
@@ -89,14 +98,27 @@ ADDITIONAL_FEATURES: frozenset[str] = frozenset(
 # HTTP globals:
 #######################################################################################
 
+MAIN_URL: str = get_env_file_value("MAIN_URL", "https://example.invalid/results/")
+ESTATE_URL: str = get_env_file_value("ESTATE_URL", "https://example.invalid/estate/")
+
+#######################################################################################
+# Scraper pagination and resume limits:
+#######################################################################################
+
 MAX_PAGE: int = 1001
+RESUME_DUPLICATE_PAGE_STOP_THRESHOLD = 1001
+
+#######################################################################################
+# HTTP retry and timeout settings:
+#######################################################################################
 
 REQUEST_TIMEOUT_SECONDS: int = 30
 REQUEST_RETRIES: int = 3
 REQUEST_RETRY_SLEEP_SECONDS: float = 1.0
 
-MAIN_URL: str = get_env_file_value("MAIN_URL", "https://example.invalid/results/")
-ESTATE_URL: str = get_env_file_value("ESTATE_URL", "https://example.invalid/estate/")
+#######################################################################################
+# HTTP request headers:
+#######################################################################################
 
 HEADERS: dict[str, str] = {
     "User-Agent": (
@@ -114,12 +136,36 @@ HEADERS: dict[str, str] = {
 }
 
 #######################################################################################
-# Other globals:
+# Data directories:
 #######################################################################################
 
 BRONZE_DATA_DIR: Path = PROJECT_ROOT / "data" / "bronze"
 SILVER_DATA_DIR: Path = PROJECT_ROOT / "data" / "silver"
 GOLD_DATA_DIR: Path = PROJECT_ROOT / "data" / "gold"
+PUBLIC_DATA_DIR: Path = PROJECT_ROOT / "data" / "public"
+
+#######################################################################################
+# Parsing helpers:
+#######################################################################################
 
 NUMBER_RE = re.compile(r"\d+(?:[\s\u00a0]\d{3})*(?:[,.]\d+)?|\d+(?:[,.]\d+)?")
 LIST_SEPARATOR = "|"
+
+#######################################################################################
+# Typing helpers:
+#######################################################################################
+
+T = TypeVar("T")
+
+#######################################################################################
+# ETL defaults:
+#######################################################################################
+
+DEFAULT_WORKERS = 4
+DEFAULT_MIN_GROUP_SIZE = 10
+
+#######################################################################################
+# Bronze stream settings:
+#######################################################################################
+
+BRONZE_STREAM_CHECKPOINT_INTERVAL = 25

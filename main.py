@@ -1,3 +1,5 @@
+"""Command-line entry point for the real estate scraping application."""
+
 from __future__ import annotations
 
 import sys

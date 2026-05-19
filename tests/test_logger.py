@@ -1,3 +1,5 @@
+"""Tests for application logger configuration."""
+
 from __future__ import annotations
 
 import logging

@@ -1,3 +1,5 @@
+"""Bronze-to-silver ETL transformations for real estate listings."""
+
 from __future__ import annotations
 
 import csv
@@ -28,10 +30,29 @@ def run_bronze_to_silver(
     silver_dir: Path = SILVER_DATA_DIR,
     processed_at: datetime | None = None,
 ) -> Path:
-    selected_bronze_path = bronze_path or find_latest_bronze_snapshot(bronze_dir)
+    """Run the bronze-to-silver ETL stage.
+
+    Args:
+        bronze_path: Optional explicit bronze snapshot path. When omitted, the
+            latest available bronze snapshot is loaded from ``bronze_dir``.
+        bronze_dir: Directory containing bronze snapshots.
+        silver_dir: Directory where the silver CSV snapshot is written.
+        processed_at: Optional timestamp used for deterministic output names and
+            record metadata.
+
+    Returns:
+        Path to the written silver CSV snapshot.
+    """
     snapshot_time = processed_at or datetime.now(timezone.utc)
-    logger.info("Silver ETL started for bronze snapshot %s", selected_bronze_path)
-    bronze_payload = load_bronze_snapshot(selected_bronze_path)
+
+    if bronze_path is None:
+        logger.info("Silver ETL started for bronze directory %s", bronze_dir)
+        bronze_payload = load_bronze_directory_snapshot(bronze_dir)
+
+    else:
+        logger.info("Silver ETL started for bronze snapshot %s", bronze_path)
+        bronze_payload = load_bronze_snapshot(bronze_path)
+
     silver_records = transform_bronze_payload(
         bronze_payload,
         processed_at=snapshot_time,
@@ -51,10 +72,29 @@ def run_bronze_to_silver(
 
 
 def find_latest_bronze_snapshot(bronze_dir: Path = BRONZE_DATA_DIR) -> Path:
+    """Find the latest bronze snapshot or canonical manifest.
+
+    Args:
+        bronze_dir: Directory containing bronze snapshot files.
+
+    Returns:
+        Path to the latest bronze snapshot or manifest.
+
+    Raises:
+        FileNotFoundError: If no bronze snapshots are present.
+    """
+    canonical_manifest = bronze_dir / "estate_snapshot_manifest.json"
+
+    if canonical_manifest.exists():
+        return canonical_manifest
+
     snapshots = sorted(
         [
+            *bronze_dir.glob("estate_snapshot_manifest_*.json"),
             *bronze_dir.glob("estate_snapshot_*.json"),
             *bronze_dir.glob("estate_snapshot_*.jsonl"),
+            *bronze_dir.glob("*/estate_snapshot_*.json"),
+            *bronze_dir.glob("*/estate_snapshot_*.jsonl"),
         ]
     )
 
@@ -64,7 +104,118 @@ def find_latest_bronze_snapshot(bronze_dir: Path = BRONZE_DATA_DIR) -> Path:
     return snapshots[-1]
 
 
+def load_bronze_directory_snapshot(
+    bronze_dir: Path = BRONZE_DATA_DIR,
+) -> dict[str, Any]:
+    """Load a complete bronze directory as one snapshot payload.
+
+    Args:
+        bronze_dir: Directory containing canonical voivodeship snapshots or
+            legacy bronze snapshots.
+
+    Returns:
+        Bronze payload with merged metadata and listing data.
+    """
+    snapshot_paths = _find_canonical_voivodeship_snapshots(bronze_dir)
+
+    if not snapshot_paths:
+        snapshot_paths = [find_latest_bronze_snapshot(bronze_dir)]
+
+    data: list[dict[str, Any]] = []
+    voivodeships: list[str] = []
+    estate_types: set[str] = set()
+    scraped_at: str | None = None
+    updated_at: str | None = None
+    max_page: int | None = None
+
+    for snapshot_path in snapshot_paths:
+        payload = load_bronze_snapshot(snapshot_path)
+        child_data = payload.get("data", [])
+
+        if isinstance(child_data, list):
+            data.extend(item for item in child_data if isinstance(item, dict))
+
+        for voivodeship in payload.get("voivodeships", []):
+            if isinstance(voivodeship, str) and voivodeship not in voivodeships:
+                voivodeships.append(voivodeship)
+
+        for item in child_data if isinstance(child_data, list) else []:
+            if not isinstance(item, dict):
+                continue
+
+            voivodeship = item.get("voivodeship")
+
+            if isinstance(voivodeship, str) and voivodeship not in voivodeships:
+                voivodeships.append(voivodeship)
+
+        for estate_type in payload.get("estate_types", []):
+            if isinstance(estate_type, str):
+                estate_types.add(estate_type)
+
+        scraped_at = _latest_timestamp(
+            scraped_at,
+            _normalize_text(payload.get("scraped_at")),
+        )
+        updated_at = _latest_timestamp(
+            updated_at,
+            _normalize_text(payload.get("updated_at")),
+        )
+
+        if isinstance(payload.get("max_page"), int):
+            max_page = payload["max_page"]
+
+    return {
+        "scraped_at": scraped_at or updated_at,
+        "updated_at": updated_at,
+        "estate_types": sorted(estate_types),
+        "voivodeships": voivodeships,
+        "max_page": max_page,
+        "count": len(data),
+        "data": data,
+    }
+
+
+def _find_canonical_voivodeship_snapshots(bronze_dir: Path) -> list[Path]:
+    snapshots: list[Path] = []
+
+    if not bronze_dir.exists():
+        return snapshots
+
+    for voivodeship_dir in sorted(
+        path for path in bronze_dir.iterdir() if path.is_dir()
+    ):
+        snapshot_path = (
+            voivodeship_dir / f"estate_snapshot_{voivodeship_dir.name}.jsonl"
+        )
+
+        if snapshot_path.exists():
+            snapshots.append(snapshot_path)
+
+    return snapshots
+
+
+def _latest_timestamp(first: str | None, second: str | None) -> str | None:
+    if first is None:
+        return second
+
+    if second is None:
+        return first
+
+    return max(first, second)
+
+
 def load_bronze_snapshot(bronze_path: Path) -> dict[str, Any]:
+    """Load a bronze snapshot from JSON, JSONL, or manifest format.
+
+    Args:
+        bronze_path: Snapshot file to load.
+
+    Returns:
+        Normalized bronze payload containing metadata and a ``data`` list.
+
+    Raises:
+        ValueError: If the snapshot root or JSONL rows have an unsupported shape.
+    """
     if bronze_path.suffix == ".jsonl":
         return _load_bronze_jsonl_snapshot(bronze_path)
 
@@ -73,7 +224,50 @@ def load_bronze_snapshot(bronze_path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"Bronze snapshot root must be an object: {bronze_path}")
 
+    if isinstance(payload.get("files"), dict):
+        return _load_bronze_manifest(payload, manifest_path=bronze_path)
+
     return payload
+
+
+def _load_bronze_manifest(
+    manifest: dict[str, Any],
+    *,
+    manifest_path: Path,
+) -> dict[str, Any]:
+    data: list[dict[str, Any]] = []
+    files = manifest.get("files", {})
+
+    if not isinstance(files, dict):
+        raise ValueError(
+            f"Bronze manifest field 'files' must be an object: {manifest_path}"
+        )
+
+    for file_info in files.values():
+        if not isinstance(file_info, dict):
+            continue
+
+        path_value = file_info.get("path")
+
+        if not isinstance(path_value, str):
+            continue
+
+        snapshot_path = Path(path_value)
+
+        if not snapshot_path.is_absolute():
+            snapshot_path = manifest_path.parent / snapshot_path
+
+        child_payload = load_bronze_snapshot(snapshot_path)
+        child_data = child_payload.get("data", [])
+
+        if isinstance(child_data, list):
+            data.extend(item for item in child_data if isinstance(item, dict))
+
+    return {
+        **{key: value for key, value in manifest.items() if key != "files"},
+        "count": len(data),
+        "data": data,
+    }
 
 
 def _load_bronze_jsonl_snapshot(bronze_path: Path) -> dict[str, Any]:
@@ -123,6 +317,18 @@ def transform_bronze_payload(
     *,
     processed_at: datetime | None = None,
 ) -> list[SilverEstate]:
+    """Transform a bronze payload into normalized silver records.
+
+    Args:
+        bronze_payload: Bronze snapshot payload containing raw listing objects.
+        processed_at: Optional timestamp assigned to produced silver records.
+
+    Returns:
+        Deduplicated silver records keyed by source and external listing id.
+
+    Raises:
+        ValueError: If the bronze payload ``data`` field is not a list.
+    """
     raw_items = bronze_payload.get("data", [])
 
     if not isinstance(raw_items, list):
@@ -165,6 +371,18 @@ def normalize_estate(
     bronze_scraped_at: str | None = None,
     processed_at: datetime | None = None,
 ) -> SilverEstate | None:
+    """Normalize one raw estate listing into the silver schema.
+
+    Args:
+        estate: Raw listing model produced by the scraper.
+        bronze_scraped_at: Optional source scrape timestamp propagated from the
+            bronze snapshot.
+        processed_at: Optional processing timestamp for deterministic tests.
+
+    Returns:
+        A normalized silver record, or ``None`` when the listing has no usable
+        external id.
+    """
     snapshot_time = processed_at or datetime.now(timezone.utc)
     source = _normalize_slug(estate.source) or "estate_service"
     external_id = _normalize_text(estate.external_id)
@@ -302,6 +520,16 @@ def save_silver_snapshot(
     output_dir: Path = SILVER_DATA_DIR,
     processed_at: datetime | None = None,
 ) -> Path:
+    """Write silver records to a timestamped CSV snapshot.
+
+    Args:
+        records: Silver records to serialize.
+        output_dir: Directory where the CSV snapshot is written.
+        processed_at: Optional timestamp used in the output filename.
+
+    Returns:
+        Path to the written CSV file.
+    """
     snapshot_time = processed_at or datetime.now(timezone.utc)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / _build_silver_filename(snapshot_time)

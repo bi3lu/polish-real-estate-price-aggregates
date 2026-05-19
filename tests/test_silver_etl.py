@@ -1,3 +1,5 @@
+"""Tests for bronze-to-silver ETL normalization and snapshot loading."""
+
 from __future__ import annotations
 
 import csv
@@ -7,6 +9,7 @@ from pathlib import Path
 
 from src.etl.silver import (
     find_latest_bronze_snapshot,
+    load_bronze_directory_snapshot,
     load_bronze_snapshot,
     normalize_estate,
     run_bronze_to_silver,
@@ -190,6 +193,103 @@ def test_load_bronze_snapshot_supports_streaming_jsonl(tmp_path: Path) -> None:
     assert payload["scraped_at"] == "2026-05-15T12:00:00+00:00"
     assert payload["count"] == 1
     assert payload["data"][0]["external_id"] == "listing-1"
+
+
+def test_load_bronze_snapshot_supports_voivodeship_manifest(tmp_path: Path) -> None:
+    bronze_path = (
+        tmp_path / "mazowieckie" / "estate_snapshot_20260515T120000000000Z.jsonl"
+    )
+    bronze_path.parent.mkdir()
+    bronze_path.write_text(
+        "\n".join(
+            [
+                json.dumps({"record_type": "metadata"}),
+                json.dumps(
+                    {
+                        "record_type": "estate",
+                        "data": {
+                            "source": "estate_service",
+                            "external_id": "listing-1",
+                            "voivodeship": "mazowieckie",
+                        },
+                    }
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    manifest_path = tmp_path / "estate_snapshot_manifest_20260515T120000000000Z.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "scraped_at": "2026-05-15T12:00:00+00:00",
+                "files": {
+                    "mazowieckie": {
+                        "path": str(bronze_path),
+                        "count": 1,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = load_bronze_snapshot(manifest_path)
+
+    assert payload["count"] == 1
+    assert payload["data"][0]["external_id"] == "listing-1"
+
+
+def test_load_bronze_directory_snapshot_reads_all_voivodeship_files(
+    tmp_path: Path,
+) -> None:
+    for voivodeship, external_id in (
+        ("malopolskie", "listing-malopolskie"),
+        ("opolskie", "listing-opolskie"),
+    ):
+        bronze_path = tmp_path / voivodeship / f"estate_snapshot_{voivodeship}.jsonl"
+        bronze_path.parent.mkdir()
+        bronze_path.write_text(
+            json.dumps(
+                {
+                    "record_type": "estate",
+                    "data": {
+                        "source": "estate_service",
+                        "external_id": external_id,
+                        "voivodeship": voivodeship,
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    manifest_path = tmp_path / "estate_snapshot_manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "files": {
+                    "malopolskie": {
+                        "path": str(
+                            tmp_path
+                            / "malopolskie"
+                            / "estate_snapshot_malopolskie.jsonl"
+                        )
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = load_bronze_directory_snapshot(tmp_path)
+
+    assert payload["count"] == 2
+    assert sorted(item["external_id"] for item in payload["data"]) == [
+        "listing-malopolskie",
+        "listing-opolskie",
+    ]
+    assert payload["voivodeships"] == ["malopolskie", "opolskie"]
 
 
 def test_run_bronze_to_silver_writes_normalized_csv(tmp_path: Path) -> None:

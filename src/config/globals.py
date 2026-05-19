@@ -102,7 +102,7 @@ MAIN_URL: str = get_env_file_value("MAIN_URL", "https://example.invalid/results/
 ESTATE_URL: str = get_env_file_value("ESTATE_URL", "https://example.invalid/estate/")
 
 #######################################################################################
-# Scraper pagination and resume limits:
+# Ingestion pagination and resume limits:
 #######################################################################################
 
 MAX_PAGE: int = 1001

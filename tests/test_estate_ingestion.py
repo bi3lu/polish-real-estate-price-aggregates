@@ -1,4 +1,4 @@
-"""Tests for listing scraping, parsing, and resume behavior."""
+"""Tests for listing ingestion, parsing, and resume behavior."""
 
 from __future__ import annotations
 
@@ -7,13 +7,13 @@ from typing import Any
 
 from src.config.env import normalize_url
 from src.config.globals import ESTATE_URL, MAIN_URL
-from src.scraper.estate_scraper import (
+from src.ingestion.estate_ingestion import (
     build_listing_url,
     extract_listing_items,
     extract_next_data_from_html,
     get_estate_info,
+    ingest_estates_for,
     iter_estates,
-    scrape_estates_for,
 )
 
 
@@ -185,7 +185,7 @@ def test_get_estate_info_maps_nested_location_objects() -> None:
     assert estate.floor == 1
 
 
-def test_scrape_estates_for_stops_after_empty_page() -> None:
+def test_ingest_estates_for_stops_after_empty_page() -> None:
     requested_urls: list[str] = []
     responses: list[dict[str, Any]] = [
         {
@@ -211,7 +211,7 @@ def test_scrape_estates_for_stops_after_empty_page() -> None:
         requested_urls.append(url)
         return responses.pop(0)
 
-    estates = scrape_estates_for(
+    estates = ingest_estates_for(
         "mieszkanie",
         "mazowieckie",
         max_page=5,
@@ -226,7 +226,7 @@ def test_scrape_estates_for_stops_after_empty_page() -> None:
     ]
 
 
-def test_scrape_estates_for_stops_after_duplicate_page() -> None:
+def test_ingest_estates_for_stops_after_duplicate_page() -> None:
     requested_urls: list[str] = []
     responses: list[dict[str, Any]] = [
         {
@@ -283,7 +283,7 @@ def test_scrape_estates_for_stops_after_duplicate_page() -> None:
         requested_urls.append(url)
         return responses.pop(0)
 
-    estates = scrape_estates_for(
+    estates = ingest_estates_for(
         "mieszkanie",
         "mazowieckie",
         max_page=5,
@@ -298,7 +298,7 @@ def test_scrape_estates_for_stops_after_duplicate_page() -> None:
     ]
 
 
-def test_scrape_estates_for_resume_continues_past_duplicate_pages() -> None:
+def test_ingest_estates_for_resume_continues_past_duplicate_pages() -> None:
     requested_urls: list[str] = []
 
     def fetcher(url: str) -> Mapping[str, Any]:
@@ -330,7 +330,7 @@ def test_scrape_estates_for_resume_continues_past_duplicate_pages() -> None:
             }
         }
 
-    estates = scrape_estates_for(
+    estates = ingest_estates_for(
         "mieszkanie",
         "mazowieckie",
         max_page=3,
@@ -347,7 +347,7 @@ def test_scrape_estates_for_resume_continues_past_duplicate_pages() -> None:
     ]
 
 
-def test_scrape_estates_for_resumes_from_start_page_and_reports_progress() -> None:
+def test_ingest_estates_for_resumes_from_start_page_and_reports_progress() -> None:
     requested_urls: list[str] = []
     completed_pages: list[tuple[str, str, int]] = []
 
@@ -374,7 +374,7 @@ def test_scrape_estates_for_resumes_from_start_page_and_reports_progress() -> No
             }
         }
 
-    estates = scrape_estates_for(
+    estates = ingest_estates_for(
         "mieszkanie",
         "mazowieckie",
         max_page=8,
@@ -504,7 +504,7 @@ def test_iter_estates_skips_existing_external_ids_before_detail_fetch() -> None:
     assert detail_urls == [f"{ESTATE_URL.rstrip('/')}/nowa-oferta-ID4new"]
 
 
-def test_scrape_estates_for_enriches_listing_with_detail_page() -> None:
+def test_ingest_estates_for_enriches_listing_with_detail_page() -> None:
     requested_detail_urls: list[str] = []
     listing_response = {
         "props": {
@@ -561,7 +561,7 @@ def test_scrape_estates_for_enriches_listing_with_detail_page() -> None:
             }
         }
 
-    estates = scrape_estates_for(
+    estates = ingest_estates_for(
         "dom",
         "mazowieckie",
         max_page=1,
@@ -583,7 +583,7 @@ def test_scrape_estates_for_enriches_listing_with_detail_page() -> None:
     assert estates[0].longitude == 21.075463
 
 
-def test_scrape_estates_for_normalizes_prefixed_detail_url() -> None:
+def test_ingest_estates_for_normalizes_prefixed_detail_url() -> None:
     requested_detail_urls: list[str] = []
     listing_response = {
         "props": {
@@ -610,7 +610,7 @@ def test_scrape_estates_for_normalizes_prefixed_detail_url() -> None:
         requested_detail_urls.append(url)
         return {}
 
-    estates = scrape_estates_for(
+    estates = ingest_estates_for(
         "mieszkanie",
         "mazowieckie",
         max_page=1,

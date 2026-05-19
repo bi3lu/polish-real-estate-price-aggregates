@@ -21,7 +21,7 @@ from src.models.estate import Estate
 def test_normalize_estate_returns_flat_silver_record() -> None:
     silver_estate = normalize_estate(
         Estate(
-            source="Otodom",
+            source="Estate Service",
             external_id=" 123 ",
             url=" https://example.invalid/offer ",
             title="  Duże   mieszkanie  ",
@@ -78,8 +78,8 @@ def test_normalize_estate_returns_flat_silver_record() -> None:
     )
 
     assert silver_estate is not None
-    assert silver_estate.record_id == "otodom:123"
-    assert silver_estate.source == "otodom"
+    assert silver_estate.record_id == "estate_service:123"
+    assert silver_estate.source == "estate_service"
     assert silver_estate.title == "Duże mieszkanie"
     assert silver_estate.estate_type == "mieszkanie"
     assert silver_estate.voivodeship == "mazowieckie"

@@ -1,4 +1,4 @@
-"""Command-line interface for scraping bronze real estate snapshots."""
+"""Command-line interface for ingesting bronze real estate snapshots."""
 
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ from typing import TextIO
 
 from src.config.env import get_required_env_file_value
 from src.config.globals import DEFAULT_WORKERS, ESTATE_TYPES, MAX_PAGE, VOIVODESHIPS
+from src.ingestion.estate_ingestion import iter_estates
 from src.models.estate import Estate
-from src.scraper.estate_scraper import iter_estates
 from src.utils.logger import get_logger
 from src.utils.storage import (
     load_bronze_external_ids_by_voivodeship,
@@ -27,7 +27,7 @@ logger = get_logger(__name__)
 
 @dataclass(frozen=True)
 class CliOptions:
-    """Parsed command-line options for a scraper run."""
+    """Parsed command-line options for an ingestion run."""
 
     estate_types: tuple[str, ...]
     voivodeships: tuple[str, ...]
@@ -36,7 +36,7 @@ class CliOptions:
     pretty: bool
 
 
-ScrapeFn = Callable[..., Iterable[Estate]]
+IngestFn = Callable[..., Iterable[Estate]]
 SaveFn = Callable[..., tuple[Path, int]]
 ValidateFn = Callable[[], None]
 ExistingIdsLoaderFn = Callable[[], dict[str, set[str]]]
@@ -44,14 +44,14 @@ PageCheckpointsLoaderFn = Callable[[], dict[str, dict[str, int]]]
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the estate scraper argument parser.
+    """Build the estate ingestion argument parser.
 
     Returns:
         Configured argument parser.
     """
     parser = argparse.ArgumentParser(
-        prog="estate-scraper",
-        description="Scrape real estate listings and save a bronze JSON snapshot.",
+        prog="estate-ingestion",
+        description="Ingest real estate listings and save a bronze JSON snapshot.",
     )
     parser.add_argument(
         "-v",
@@ -79,7 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-page",
         type=_positive_int,
         default=MAX_PAGE,
-        help=f"Maximum page to scrape per filter combination. Defaults to {MAX_PAGE}.",
+        help=f"Maximum page to process per filter combination. Defaults to {MAX_PAGE}.",
     )
     parser.add_argument(
         "--workers",
@@ -87,7 +87,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=_positive_int,
         default=DEFAULT_WORKERS,
         help=(
-            "Number of worker threads used to scrape filter combinations. "
+            "Number of worker threads used to process filter combinations. "
             f"Defaults to {DEFAULT_WORKERS}."
         ),
     )
@@ -143,19 +143,19 @@ def _validate_required_runtime_env() -> None:
 def run_cli(
     args: Sequence[str] | None = None,
     *,
-    scraper: ScrapeFn = iter_estates,
+    ingester: IngestFn = iter_estates,
     saver: SaveFn = stream_estates_to_bronze,
     validator: ValidateFn = _validate_required_runtime_env,
     existing_ids_loader: ExistingIdsLoaderFn = load_bronze_external_ids_by_voivodeship,
     page_checkpoints_loader: PageCheckpointsLoaderFn = load_bronze_page_checkpoints,
     stdout: TextIO = sys.stdout,
 ) -> int:
-    """Run the scraper CLI workflow.
+    """Run the listing ingestion CLI workflow.
 
     Args:
         args: Optional command-line arguments.
-        scraper: Callable that yields scraped estates.
-        saver: Callable that persists scraped estates.
+        ingester: Callable that yields ingested estates.
+        saver: Callable that persists ingested estates.
         validator: Callable that validates runtime configuration.
         existing_ids_loader: Callable that loads already persisted listing ids.
         page_checkpoints_loader: Callable that loads resume page checkpoints.
@@ -200,7 +200,7 @@ def run_cli(
                 max(previous_page, page)
             )
 
-    estates = scraper(
+    estates = ingester(
         estate_types=options.estate_types,
         voivodeships=options.voivodeships,
         max_page=options.max_page,

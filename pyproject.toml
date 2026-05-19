@@ -1,8 +1,11 @@
 [project]
 name = "polish-real-estate-price-aggregates"
 version = "0.1.0"
-description = "Add your description here"
+description = "Data pipeline for Polish real estate listing aggregates and anonymized public datasets."
 readme = "README.md"
+authors = [
+    { name = "Jakub Bielecki" },
+]
 requires-python = ">=3.10"
 dependencies = [
     "pydantic>=2.13.4",
@@ -13,7 +16,6 @@ dev = [
     "black>=26.3.1",
     "isort>=8.0.1",
     "mypy>=2.1.0",
-    "pre-commit>=4.5.0",
     "pytest>=9.0.2",
     "ruff>=0.14.8",
 ]

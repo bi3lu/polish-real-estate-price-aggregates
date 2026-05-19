@@ -30,9 +30,9 @@ def save_estates_to_bronze(
         estates: Estate records to serialize.
         estate_types: Estate type filters represented in the snapshot.
         voivodeships: Voivodeship filters represented in the snapshot.
-        max_page: Maximum page used during scraping.
+        max_page: Maximum page used during ingestion.
         output_dir: Directory where the snapshot is written.
-        scraped_at: Optional scrape timestamp used in metadata and filename.
+        scraped_at: Optional ingestion timestamp used in metadata and filename.
 
     Returns:
         Path to the written JSON snapshot.
@@ -77,10 +77,10 @@ def stream_estates_to_bronze(
         estates: Estate records to persist.
         estate_types: Estate type filters represented in the manifest.
         voivodeships: Voivodeship filters represented in the manifest.
-        max_page: Maximum page used during scraping.
+        max_page: Maximum page used during ingestion.
         output_dir: Directory where JSONL files and manifest are written.
-        scraped_at: Optional scrape timestamp used in manifest metadata.
-        page_checkpoints_by_voivodeship: Completed scrape pages to persist for
+        scraped_at: Optional ingestion timestamp used in manifest metadata.
+        page_checkpoints_by_voivodeship: Completed ingestion pages to persist for
             resume support.
 
     Returns:

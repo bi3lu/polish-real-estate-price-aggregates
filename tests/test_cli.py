@@ -51,12 +51,12 @@ def test_parse_cli_args_rejects_unknown_values() -> None:
         parse_cli_args(["--estate-type", "unknown"])
 
 
-def test_run_cli_calls_scraper_with_selected_filters_and_prints_json() -> None:
+def test_run_cli_calls_ingester_with_selected_filters_and_prints_json() -> None:
     stdout = StringIO()
     captured_kwargs: dict[str, Any] = {}
     captured_save_kwargs: dict[str, Any] = {}
 
-    def scraper(**kwargs: Any) -> list[Estate]:
+    def ingester(**kwargs: Any) -> list[Estate]:
         captured_kwargs.update(kwargs)
         return [
             Estate(
@@ -82,7 +82,7 @@ def test_run_cli_calls_scraper_with_selected_filters_and_prints_json() -> None:
             "--max-page",
             "2",
         ],
-        scraper=scraper,
+        ingester=ingester,
         saver=saver,
         validator=lambda: None,
         existing_ids_loader=lambda: {},

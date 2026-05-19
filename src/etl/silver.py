@@ -374,8 +374,8 @@ def normalize_estate(
     """Normalize one raw estate listing into the silver schema.
 
     Args:
-        estate: Raw listing model produced by the scraper.
-        bronze_scraped_at: Optional source scrape timestamp propagated from the
+        estate: Raw listing model produced by the ingestion layer.
+        bronze_scraped_at: Optional source ingestion timestamp propagated from the
             bronze snapshot.
         processed_at: Optional processing timestamp for deterministic tests.
 

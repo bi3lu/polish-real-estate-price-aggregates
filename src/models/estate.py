@@ -1,4 +1,4 @@
-"""Raw real estate listing models produced by the scraper."""
+"""Raw real estate listing models produced by the ingestion layer."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class Estate(BaseModel):
-    """Snapshot of a single scraped real estate listing."""
+    """Snapshot of a single ingested real estate listing."""
 
     model_config = ConfigDict(extra="forbid")
 

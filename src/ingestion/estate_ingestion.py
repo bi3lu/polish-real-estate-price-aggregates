@@ -1,4 +1,4 @@
-"""Scraper for real estate listings."""
+"""Ingestion utilities for real estate listings."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ logger = get_logger(__name__)
 
 @dataclass(frozen=True)
 class _WorkerFinished:
-    """Completion marker emitted by threaded scraper workers."""
+    """Completion marker emitted by threaded ingestion workers."""
 
     estate_type: str
     voivodeship: str
@@ -47,7 +47,7 @@ class _WorkerFinished:
     error: Exception | None = None
 
 
-ScrapeProgressCallback = Callable[[str, str, int], None]
+IngestionProgressCallback = Callable[[str, str, int], None]
 
 
 class _NextDataHTMLParser(HTMLParser):
@@ -284,8 +284,8 @@ def get_estate_info(
 
     Args:
         estate_data: Raw listing or detail payload.
-        estate_type: Optional estate type assigned from the scrape target.
-        voivodeship: Optional voivodeship assigned from the scrape target.
+        estate_type: Optional estate type assigned from the ingestion target.
+        voivodeship: Optional voivodeship assigned from the ingestion target.
 
     Returns:
         Estate model, or ``None`` when no stable external id can be derived.
@@ -388,7 +388,7 @@ def get_estate_info(
     )
 
 
-def scrape_estates_for(
+def ingest_estates_for(
     estate_type: str,
     voivodeship: str,
     *,
@@ -397,9 +397,9 @@ def scrape_estates_for(
     detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
     existing_external_ids: Iterable[str] = (),
     start_page: int = 1,
-    progress_callback: ScrapeProgressCallback | None = None,
+    progress_callback: IngestionProgressCallback | None = None,
 ) -> list[Estate]:
-    """Scrape listings for a single estate type and voivodeship.
+    """Ingest listings for a single estate type and voivodeship.
 
     Args:
         estate_type: Estate type slug.
@@ -408,11 +408,11 @@ def scrape_estates_for(
         fetcher: Callable used to fetch listing pages.
         detail_fetcher: Optional callable used to fetch listing detail pages.
         existing_external_ids: Existing ids skipped during resume.
-        start_page: First page to scrape.
+        start_page: First page to process.
         progress_callback: Optional callback invoked after each completed page.
 
     Returns:
-        Scraped estate records.
+        Ingested estate records.
     """
     return list(
         iter_estates_for(
@@ -437,7 +437,7 @@ def iter_estates_for(
     detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
     existing_external_ids: Iterable[str] = (),
     start_page: int = 1,
-    progress_callback: ScrapeProgressCallback | None = None,
+    progress_callback: IngestionProgressCallback | None = None,
 ) -> Iterable[Estate]:
     """Yield listings for a single estate type and voivodeship.
 
@@ -448,7 +448,7 @@ def iter_estates_for(
         fetcher: Callable used to fetch listing pages.
         detail_fetcher: Optional callable used to fetch listing detail pages.
         existing_external_ids: Existing ids skipped during resume.
-        start_page: First page to scrape.
+        start_page: First page to process.
         progress_callback: Optional callback invoked after each completed page.
 
     Yields:
@@ -476,7 +476,7 @@ def iter_estates_for(
         RESUME_DUPLICATE_PAGE_STOP_THRESHOLD if existing_external_ids_count else 1
     )
     logger.info(
-        "Streaming scrape started for estate_type=%s voivodeship=%s max_page=%s "
+        "Streaming ingestion started for estate_type=%s voivodeship=%s max_page=%s "
         "start_page=%s existing_ids=%s",
         estate_type,
         voivodeship,
@@ -615,7 +615,7 @@ def iter_estates_for(
         break
 
     logger.info(
-        "Streaming scrape finished for estate_type=%s voivodeship=%s total=%s",
+        "Streaming ingestion finished for estate_type=%s voivodeship=%s total=%s",
         estate_type,
         voivodeship,
         total_estates_count,
@@ -632,13 +632,13 @@ def iter_estates(
     detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
     existing_external_ids_by_voivodeship: Mapping[str, Iterable[str]] | None = None,
     start_pages_by_target: Mapping[str, Mapping[str, int]] | None = None,
-    progress_callback: ScrapeProgressCallback | None = None,
+    progress_callback: IngestionProgressCallback | None = None,
 ) -> Iterable[Estate]:
     """Yield listings for all requested estate type and voivodeship combinations.
 
     Args:
-        estate_types: Estate type slugs to scrape.
-        voivodeships: Voivodeship slugs to scrape.
+        estate_types: Estate type slugs to process.
+        voivodeships: Voivodeship slugs to process.
         max_page: Highest listing page to request for each target.
         workers: Number of worker threads. Values above one use threaded mode.
         fetcher: Callable used to fetch listing pages.
@@ -670,7 +670,7 @@ def iter_estates(
     total_estates_count = 0
 
     logger.info(
-        "Streaming scrape started for estate_types=%s voivodeships=%s max_page=%s",
+        "Streaming ingestion started for estate_types=%s voivodeships=%s max_page=%s",
         ", ".join(selected_estate_types),
         ", ".join(selected_voivodeships),
         max_page,
@@ -698,7 +698,7 @@ def iter_estates(
                 yield estate
 
     logger.info(
-        "Streaming scrape finished for all filters total=%s", total_estates_count
+        "Streaming ingestion finished for all filters total=%s", total_estates_count
     )
 
 
@@ -712,13 +712,13 @@ def iter_estates_threaded(
     detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
     existing_external_ids_by_voivodeship: Mapping[str, Iterable[str]] | None = None,
     start_pages_by_target: Mapping[str, Mapping[str, int]] | None = None,
-    progress_callback: ScrapeProgressCallback | None = None,
+    progress_callback: IngestionProgressCallback | None = None,
 ) -> Iterable[Estate]:
     """Yield listings using worker threads split by filter combinations.
 
     Args:
-        estate_types: Estate type slugs to scrape.
-        voivodeships: Voivodeship slugs to scrape.
+        estate_types: Estate type slugs to process.
+        voivodeships: Voivodeship slugs to process.
         max_page: Highest listing page to request for each target.
         workers: Requested number of worker threads.
         fetcher: Callable used to fetch listing pages.
@@ -733,30 +733,30 @@ def iter_estates_threaded(
 
     Raises:
         ValueError: If ``workers`` is lower than one.
-        RuntimeError: If a worker fails while scraping a target.
+        RuntimeError: If a worker fails while processing a target.
     """
     if workers < 1:
         raise ValueError("workers must be greater than or equal to 1")
 
     selected_estate_types = tuple(sorted(estate_types))
     selected_voivodeships = tuple(sorted(voivodeships))
-    scrape_targets = tuple(
+    ingestion_targets = tuple(
         (estate_type, voivodeship)
         for estate_type in selected_estate_types
         for voivodeship in selected_voivodeships
     )
 
-    if not scrape_targets:
+    if not ingestion_targets:
         return
 
-    max_workers = min(workers, len(scrape_targets))
+    max_workers = min(workers, len(ingestion_targets))
     output_queue: queue.Queue[Estate | _WorkerFinished] = queue.Queue(
         maxsize=max_workers * 100
     )
     total_estates_count = 0
 
     logger.info(
-        "Threaded streaming scrape started: estate_types=%s voivodeships=%s "
+        "Threaded streaming ingestion started: estate_types=%s voivodeships=%s "
         "max_page=%s workers=%s active_workers=%s",
         ", ".join(selected_estate_types),
         ", ".join(selected_voivodeships),
@@ -765,7 +765,7 @@ def iter_estates_threaded(
         max_workers,
     )
 
-    def scrape_target(estate_type: str, voivodeship: str) -> int:
+    def ingest_target(estate_type: str, voivodeship: str) -> int:
         count = 0
 
         try:
@@ -810,11 +810,11 @@ def iter_estates_threaded(
 
     with ThreadPoolExecutor(
         max_workers=max_workers,
-        thread_name_prefix="estate-scraper",
+        thread_name_prefix="estate-ingestion",
     ) as executor:
         futures = [
-            executor.submit(scrape_target, estate_type, voivodeship)
-            for estate_type, voivodeship in scrape_targets
+            executor.submit(ingest_target, estate_type, voivodeship)
+            for estate_type, voivodeship in ingestion_targets
         ]
         remaining_targets = len(futures)
 
@@ -830,7 +830,7 @@ def iter_estates_threaded(
                             future.cancel()
 
                         logger.error(
-                            "Threaded scrape failed for estate_type=%s "
+                            "Threaded ingestion failed for estate_type=%s "
                             "voivodeship=%s after %s records: %s",
                             item.estate_type,
                             item.voivodeship,
@@ -838,13 +838,13 @@ def iter_estates_threaded(
                             item.error,
                         )
                         raise RuntimeError(
-                            "Threaded scrape failed for "
+                            "Threaded ingestion failed for "
                             f"estate_type={item.estate_type} "
                             f"voivodeship={item.voivodeship}"
                         ) from item.error
 
                     logger.info(
-                        "Threaded scrape worker finished for estate_type=%s "
+                        "Threaded ingestion worker finished for estate_type=%s "
                         "voivodeship=%s records=%s",
                         item.estate_type,
                         item.voivodeship,
@@ -863,12 +863,12 @@ def iter_estates_threaded(
             future.result()
 
     logger.info(
-        "Threaded streaming scrape finished for all filters total=%s",
+        "Threaded streaming ingestion finished for all filters total=%s",
         total_estates_count,
     )
 
 
-def scrape_estates(
+def ingest_estates(
     *,
     estate_types: Iterable[str] = ESTATE_TYPES,
     voivodeships: Iterable[str] = VOIVODESHIPS,
@@ -878,13 +878,13 @@ def scrape_estates(
     detail_fetcher: Callable[[str], Mapping[str, Any]] | None = fetch_next_data_json,
     existing_external_ids_by_voivodeship: Mapping[str, Iterable[str]] | None = None,
     start_pages_by_target: Mapping[str, Mapping[str, int]] | None = None,
-    progress_callback: ScrapeProgressCallback | None = None,
+    progress_callback: IngestionProgressCallback | None = None,
 ) -> list[Estate]:
-    """Scrape listings for all requested estate type and voivodeship combinations.
+    """Ingest listings for all requested estate type and voivodeship combinations.
 
     Args:
-        estate_types: Estate type slugs to scrape.
-        voivodeships: Voivodeship slugs to scrape.
+        estate_types: Estate type slugs to process.
+        voivodeships: Voivodeship slugs to process.
         max_page: Highest listing page to request for each target.
         workers: Number of worker threads.
         fetcher: Callable used to fetch listing pages.
@@ -895,13 +895,13 @@ def scrape_estates(
         progress_callback: Optional callback invoked after each completed page.
 
     Returns:
-        Scraped estate records.
+        Ingested estate records.
     """
     selected_estate_types = tuple(sorted(estate_types))
     selected_voivodeships = tuple(sorted(voivodeships))
 
     logger.info(
-        "Scraping started for estate_types=%s voivodeships=%s max_page=%s workers=%s",
+        "Ingestion started for estate_types=%s voivodeships=%s max_page=%s workers=%s",
         ", ".join(selected_estate_types),
         ", ".join(selected_voivodeships),
         max_page,
@@ -922,7 +922,7 @@ def scrape_estates(
         )
     )
 
-    logger.info("Scraping finished for all filters total=%s", len(estates))
+    logger.info("Ingestion finished for all filters total=%s", len(estates))
 
     return estates
 
@@ -945,7 +945,7 @@ def _target_start_page(
 
 
 def _mark_page_completed(
-    progress_callback: ScrapeProgressCallback | None,
+    progress_callback: IngestionProgressCallback | None,
     *,
     estate_type: str,
     voivodeship: str,
@@ -1500,5 +1500,5 @@ def _as_text(value: Any) -> str | None:
 
 
 if __name__ == "__main__":
-    scraped_estates = scrape_estates()
-    logger.info("Scraped %s estates", len(scraped_estates))
+    ingested_estates = ingest_estates()
+    logger.info("Ingested %s estates", len(ingested_estates))

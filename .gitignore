@@ -217,8 +217,6 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Db files
-
 # Project data snapshots
 data/bronze/
 data/silver/*.csv

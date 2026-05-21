@@ -292,7 +292,7 @@ and writes timestamped CSV outputs to the next layer.
 │   ├── config/          # Environment loading and global constants
 │   ├── etl/             # Bronze, silver, gold, and public ETL stages
 │   ├── models/          # Pydantic models for each data layer
-│   ├── ingestion/       # Listing ingestion and parsing logic
+│   ├── ingestion/       # Ingestion facade, pipeline, transport, and parsing
 │   └── utils/           # CLI, logging, and storage helpers
 ├── tests/               # Unit tests
 ├── data/
@@ -302,6 +302,12 @@ and writes timestamped CSV outputs to the next layer.
 │   └── public/
 └── .github/workflows/   # CI configuration
 ```
+
+The ingestion package is intentionally split into small modules:
+`estate_ingestion.py` keeps the stable public import path, `pipeline.py`
+orchestrates pagination and threaded streaming, `transport.py` fetches and
+parses source-service payloads, and `parsing.py` maps raw listing/detail data
+into typed `Estate` records.
 
 ## Development
 

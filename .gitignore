@@ -219,6 +219,7 @@ __marimo__/
 
 # Project data snapshots
 data/bronze/
+data/demo/
 data/silver/*.csv
 data/gold/*.csv
 *.db

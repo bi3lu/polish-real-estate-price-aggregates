@@ -24,6 +24,8 @@ base URLs for the supported service in your local `.env` file.
 
 - End-to-end data engineering pipeline with bronze, silver, gold, and public
   data layers.
+- Offline demo mode that runs the full ETL flow from local fixture records
+  without requiring source-service configuration.
 - Resumable listing ingestion with duplicate detection and page checkpoints.
 - Typed Pydantic models and strict static analysis with `mypy`.
 - Feature engineering, aggregate tables, and data quality outputs for analytics
@@ -172,6 +174,17 @@ Install dependencies:
 uv sync --dev
 ```
 
+Run the offline demo pipeline without configuring `.env` or contacting the
+source service:
+
+```bash
+uv run python -m src.etl.demo
+```
+
+The demo writes deterministic fixture-based outputs under `data/demo/` for all
+pipeline layers: bronze, silver, gold, and public. This is the fastest way to
+review the project flow in a fresh checkout.
+
 Run a small ingestion job for one estate type and one voivodeship:
 
 ```bash
@@ -215,6 +228,29 @@ Configured estate types:
 - `kawalerka`
 
 Configured voivodeships are defined in `src/config/globals.py`.
+
+## Offline Demo Pipeline
+
+For reviewers who only want to inspect the ETL flow, the project includes a
+fully local demo mode:
+
+```bash
+uv run python -m src.etl.demo
+```
+
+The command uses a small built-in fixture dataset and writes:
+
+| Layer | Demo output |
+| --- | --- |
+| Bronze | `data/demo/bronze/` |
+| Silver | `data/demo/silver/` |
+| Gold | `data/demo/gold/` |
+| Public | `data/demo/public/` |
+
+The demo intentionally bypasses ingestion and does not read `.env`, call the
+source service, or require network access. Its purpose is to make the pipeline
+reviewable in seconds while keeping real collection configuration private and
+optional.
 
 ## Running the ETL Pipeline
 

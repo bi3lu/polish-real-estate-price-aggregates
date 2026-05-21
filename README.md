@@ -5,6 +5,7 @@
 ![Type Checked](https://img.shields.io/badge/type%20checked-mypy-blue)
 ![Code Style](https://img.shields.io/badge/code%20style-black-000000)
 ![Linting](https://img.shields.io/badge/linting-ruff-orange)
+[![Coverage](assets/coverage.svg)](assets/coverage.svg)
 
 Python data pipeline for collecting, normalizing, aggregating, and publishing
 analysis-ready Polish residential real estate listing data.
@@ -23,6 +24,8 @@ base URLs for the supported service in your local `.env` file.
 
 - End-to-end data engineering pipeline with bronze, silver, gold, and public
   data layers.
+- Offline demo mode that runs the full ETL flow from local fixture records
+  without requiring source-service configuration.
 - Resumable listing ingestion with duplicate detection and page checkpoints.
 - Typed Pydantic models and strict static analysis with `mypy`.
 - Feature engineering, aggregate tables, and data quality outputs for analytics
@@ -49,51 +52,55 @@ Architecture and UML-style diagrams are available in [`docs/`](docs/README.md).
 
 ## Example Insights
 
-The current public export contains 23,719 anonymized listings from selected
+The current public export contains 49,047 anonymized listings from selected
 voivodeships. It is a regional sample rather than a complete national market
 dataset, but it is large enough to demonstrate the analytical outputs produced
 by the pipeline.
 
 Example findings from the published public dataset:
 
-- Mazowieckie and Malopolskie have the highest median public price per square
-  meter in the sample, at about 14,100 PLN/sqm and 13,500 PLN/sqm respectively.
+- Malopolskie and Mazowieckie have the highest median public price per square
+  meter in the sample, at about 13,500 PLN/sqm and 13,100 PLN/sqm respectively.
 - Apartments are priced much higher per square meter than houses in the sample:
-  median public price per square meter is about 14,300 PLN/sqm for apartments
-  versus 7,400 PLN/sqm for houses.
+  median public price per square meter is about 12,200 PLN/sqm for apartments
+  versus 6,900 PLN/sqm for houses.
 - Studio apartments have the highest median price density at about
-  16,200 PLN/sqm, which is consistent with smaller units carrying a higher
+  13,900 PLN/sqm, which is consistent with smaller units carrying a higher
   price per square meter.
-- The public export keeps 99.33% of price targets, exposes public city labels
-  for 75.57% of records, and exposes generalized coordinate-grid locations for
-  13.26% of records after privacy filtering.
+- The public export keeps 98.93% of price targets, exposes public city labels
+  for 76.50% of records, and exposes generalized coordinate-grid locations for
+  12.52% of records after privacy filtering.
 
 Median public price per square meter by voivodeship:
 
-```mermaid
-xychart-beta
-  x-axis ["Mazowieckie", "Malopolskie", "Dolnoslaskie", "Opolskie"]
-  y-axis "PLN per sqm" 0 --> 16000
-  bar [14100, 13500, 7700, 6800]
-```
+| Rank | Voivodeship | Records | Median public price per sqm |
+| ---: | --- | ---: | ---: |
+| 1 | `malopolskie` | 12,261 | 13,500 PLN |
+| 2 | `mazowieckie` | 6,216 | 13,100 PLN |
+| 3 | `pomorskie` | 8,074 | 10,100 PLN |
+| 4 | `wielkopolskie` | 2,877 | 9,000 PLN |
+| 5 | `podkarpackie` | 3,725 | 7,900 PLN |
+| 6 | `dolnoslaskie` | 5,933 | 7,700 PLN |
+| 7 | `slaskie` | 7,915 | 7,000 PLN |
+| 8 | `opolskie` | 2,046 | 6,800 PLN |
 
 Segment-level comparison:
 
 | Segment | Records | Median public price per sqm |
 | --- | ---: | ---: |
-| Studio apartments | 3,253 | 16,200 PLN |
-| Apartments | 10,385 | 14,300 PLN |
-| Houses | 10,079 | 7,400 PLN |
+| Studio apartments | 7,303 | 13,900 PLN |
+| Apartments | 20,363 | 12,200 PLN |
+| Houses | 21,381 | 6,900 PLN |
 
 Public dataset coverage summary:
 
 | Metric | Value |
 | --- | ---: |
-| Public records | 23,719 |
-| Records with public price target | 99.33% |
-| Records with public city | 75.57% |
-| Records with generalized geo grid | 13.26% |
-| Distinct public cities | 201 |
+| Public records | 49,047 |
+| Records with public price target | 98.93% |
+| Records with public city | 76.50% |
+| Records with generalized geo grid | 12.52% |
+| Distinct public cities | 415 |
 
 Sample public rows:
 
@@ -171,6 +178,17 @@ Install dependencies:
 uv sync --dev
 ```
 
+Run the offline demo pipeline without configuring `.env` or contacting the
+source service:
+
+```bash
+uv run python -m src.etl.demo
+```
+
+The demo writes deterministic fixture-based outputs under `data/demo/` for all
+pipeline layers: bronze, silver, gold, and public. This is the fastest way to
+review the project flow in a fresh checkout.
+
 Run a small ingestion job for one estate type and one voivodeship:
 
 ```bash
@@ -214,6 +232,29 @@ Configured estate types:
 - `kawalerka`
 
 Configured voivodeships are defined in `src/config/globals.py`.
+
+## Offline Demo Pipeline
+
+For reviewers who only want to inspect the ETL flow, the project includes a
+fully local demo mode:
+
+```bash
+uv run python -m src.etl.demo
+```
+
+The command uses a small built-in fixture dataset and writes:
+
+| Layer | Demo output |
+| --- | --- |
+| Bronze | `data/demo/bronze/` |
+| Silver | `data/demo/silver/` |
+| Gold | `data/demo/gold/` |
+| Public | `data/demo/public/` |
+
+The demo intentionally bypasses ingestion and does not read `.env`, call the
+source service, or require network access. Its purpose is to make the pipeline
+reviewable in seconds while keeping real collection configuration private and
+optional.
 
 ## Running the ETL Pipeline
 
@@ -266,6 +307,13 @@ Run tests:
 
 ```bash
 uv run pytest
+```
+
+Run tests with coverage and refresh the local badge:
+
+```bash
+uv run pytest --cov=src --cov-report=term-missing --cov-report=json:coverage.json
+uv run python scripts/update_coverage_badge.py
 ```
 
 Run linting and formatting checks:
@@ -350,6 +398,33 @@ not as an authoritative nationwide market dataset.
 
 Before publishing regenerated public data, review the output schema and sample
 rows to ensure no new sensitive or source-identifying fields were introduced.
+
+## Limitations / Trade-offs
+
+This project is intentionally built as a pragmatic data engineering pipeline,
+not as an official market registry or guaranteed complete data source. The main
+trade-offs are:
+
+- The scraper depends on the HTML and embedded Next.js data shape exposed by the
+  supported source service. If that structure changes, ingestion may need parser
+  updates before new snapshots can be collected reliably.
+- The dataset does not guarantee full coverage of the Polish residential real
+  estate market. It contains listings that were reachable during configured
+  ingestion runs for selected estate types and voivodeships.
+- Resume checkpoints reduce unnecessary pagination and lower the chance of
+  repeated blocked requests, but they can skip newly inserted listings that
+  appear on pages before the saved checkpoint. Full refreshes should clear or
+  reset checkpoint metadata intentionally.
+- The public dataset is a privacy-filtered sample, not a lossless copy of the
+  internal data. Some cities and coordinates are suppressed, numerical targets
+  are rounded, and direct identifiers are removed by design.
+- Ingestion should not be run aggressively. Use conservative worker counts,
+  bounded page ranges, pauses between runs, and responsible retry behavior. The
+  pipeline is designed for careful periodic collection, not high-pressure
+  crawling.
+- Analytical outputs should be treated as exploratory. They are useful for data
+  quality monitoring, feature engineering, dashboards, and ML baselines, but not
+  as authoritative valuation or investment advice.
 
 ## Disclaimer
 

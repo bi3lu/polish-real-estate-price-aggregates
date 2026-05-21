@@ -14,22 +14,26 @@ location attributes before publication.
 
 | File | Description |
 | --- | --- |
-| `estate_public_ml_features_20260519T071853818654Z.csv` | Public listing-level feature table for analysis and ML experiments. |
-| `estate_public_data_quality_20260519T071853818654Z.csv` | Dataset-level quality and coverage metrics for the same export run. |
+| `estate_public_ml_features_20260521T102526539256Z.csv` | Public listing-level feature table for analysis and ML experiments. |
+| `estate_public_data_quality_20260521T102526539256Z.csv` | Dataset-level quality and coverage metrics for the same export run. |
 
 The timestamp in each filename is the UTC processing timestamp of the export.
 
 ## Coverage
 
 This is not a full-country dump of all Polish real estate listings. The current
-snapshot contains 23,719 public records from selected voivodeships only:
+snapshot contains 49,047 public records from selected voivodeships only:
 
 | Voivodeship | Records |
 | --- | ---: |
-| `malopolskie` | 12,355 |
-| `dolnoslaskie` | 5,943 |
-| `mazowieckie` | 3,362 |
-| `opolskie` | 2,059 |
+| `malopolskie` | 12,261 |
+| `pomorskie` | 8,074 |
+| `slaskie` | 7,915 |
+| `mazowieckie` | 6,216 |
+| `dolnoslaskie` | 5,933 |
+| `podkarpackie` | 3,725 |
+| `wielkopolskie` | 2,877 |
+| `opolskie` | 2,046 |
 
 The dataset includes three listing categories: `mieszkanie`, `dom`, and
 `kawalerka`. It should therefore be treated as a sampled regional dataset, not
@@ -103,13 +107,13 @@ The data quality CSV summarizes the export run. The current snapshot reports:
 
 | Metric | Value |
 | --- | ---: |
-| `source_records_count` | 23,719 |
-| `public_records_count` | 23,719 |
+| `source_records_count` | 49,047 |
+| `public_records_count` | 49,047 |
 | `min_group_size` | 10 |
-| `share_with_public_city` | 0.7557 |
-| `share_with_public_geo_grid` | 0.1326 |
-| `share_with_public_price_target` | 0.9933 |
-| `distinct_public_cities_count` | 201 |
+| `share_with_public_city` | 0.7650 |
+| `share_with_public_geo_grid` | 0.1252 |
+| `share_with_public_price_target` | 0.9893 |
+| `distinct_public_cities_count` | 415 |
 
 ## Recommended Use
 

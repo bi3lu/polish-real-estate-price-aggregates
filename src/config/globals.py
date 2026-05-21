@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TypeVar
 
@@ -143,6 +144,7 @@ BRONZE_DATA_DIR: Path = PROJECT_ROOT / "data" / "bronze"
 SILVER_DATA_DIR: Path = PROJECT_ROOT / "data" / "silver"
 GOLD_DATA_DIR: Path = PROJECT_ROOT / "data" / "gold"
 PUBLIC_DATA_DIR: Path = PROJECT_ROOT / "data" / "public"
+DEMO_BASE_DIR = PROJECT_ROOT / "data" / "demo"
 
 #######################################################################################
 # Parsing helpers:
@@ -169,3 +171,10 @@ DEFAULT_MIN_GROUP_SIZE = 10
 #######################################################################################
 
 BRONZE_STREAM_CHECKPOINT_INTERVAL = 25
+
+#######################################################################################
+# Demo settings:
+#######################################################################################
+
+DEMO_PROCESSED_AT = datetime(2026, 5, 21, 12, 0, tzinfo=timezone.utc)
+DEMO_MIN_GROUP_SIZE = 2

@@ -45,6 +45,7 @@ htmlcov/
 .cache
 nosetests.xml
 coverage.xml
+coverage.json
 *.cover
 *.py.cover
 .hypothesis/
@@ -219,6 +220,7 @@ __marimo__/
 
 # Project data snapshots
 data/bronze/
+data/demo/
 data/silver/*.csv
 data/gold/*.csv
 *.db

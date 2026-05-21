@@ -17,6 +17,7 @@ dev = [
     "isort>=8.0.1",
     "mypy>=2.1.0",
     "pytest>=9.0.2",
+    "pytest-cov>=7.1.0",
     "ruff>=0.14.8",
 ]
 
@@ -44,3 +45,11 @@ warn_unused_configs = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
+
+[tool.coverage.run]
+branch = true
+source = ["src"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false

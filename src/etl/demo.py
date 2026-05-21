@@ -15,6 +15,7 @@ from src.etl.silver import run_bronze_to_silver
 from src.models.estate import Estate
 from src.utils.storage import save_estates_to_bronze
 
+
 @dataclass(frozen=True)
 class DemoOutputPaths:
     """Filesystem paths written by the offline demo pipeline."""
@@ -92,7 +93,6 @@ def build_demo_estates() -> list[Estate]:
             longitude=21.01,
             extras=("balcony", "basement"),
         ),
-        
         _estate(
             external_id="demo-waw-m-002",
             title="Demo mieszkanie blisko metra",
@@ -112,7 +112,6 @@ def build_demo_estates() -> list[Estate]:
             longitude=21.02,
             extras=("balcony", "garage"),
         ),
-        
         _estate(
             external_id="demo-waw-k-001",
             title="Demo kawalerka kompaktowa",
@@ -151,7 +150,6 @@ def build_demo_estates() -> list[Estate]:
             longitude=20.99,
             extras=("balcony",),
         ),
-        
         _estate(
             external_id="demo-krk-m-001",
             title="Demo mieszkanie w Krakowie",
@@ -190,7 +188,6 @@ def build_demo_estates() -> list[Estate]:
             longitude=19.91,
             extras=("balcony", "garage", "basement"),
         ),
-        
         _estate(
             external_id="demo-wro-dom-001",
             title="Demo dom pod Wroclawiem",
@@ -211,7 +208,6 @@ def build_demo_estates() -> list[Estate]:
             extras=("garage", "garden"),
             terrain_area_sqm=550,
         ),
-        
         _estate(
             external_id="demo-wro-dom-002",
             title="Demo dom z ogrodem",

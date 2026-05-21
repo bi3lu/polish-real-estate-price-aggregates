@@ -5,7 +5,7 @@
 ![Type Checked](https://img.shields.io/badge/type%20checked-mypy-blue)
 ![Code Style](https://img.shields.io/badge/code%20style-black-000000)
 ![Linting](https://img.shields.io/badge/linting-ruff-orange)
-![Coverage](https://img.shields.io/badge/coverage-tests%20passing-brightgreen)
+[![Coverage](assets/coverage.svg)](assets/coverage.svg)
 
 Python data pipeline for collecting, normalizing, aggregating, and publishing
 analysis-ready Polish residential real estate listing data.
@@ -303,6 +303,13 @@ Run tests:
 
 ```bash
 uv run pytest
+```
+
+Run tests with coverage and refresh the local badge:
+
+```bash
+uv run pytest --cov=src --cov-report=term-missing --cov-report=json:coverage.json
+uv run python scripts/update_coverage_badge.py
 ```
 
 Run linting and formatting checks:

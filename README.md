@@ -49,51 +49,51 @@ Architecture and UML-style diagrams are available in [`docs/`](docs/README.md).
 
 ## Example Insights
 
-The current public export contains 23,719 anonymized listings from selected
+The current public export contains 49,047 anonymized listings from selected
 voivodeships. It is a regional sample rather than a complete national market
 dataset, but it is large enough to demonstrate the analytical outputs produced
 by the pipeline.
 
 Example findings from the published public dataset:
 
-- Mazowieckie and Malopolskie have the highest median public price per square
-  meter in the sample, at about 14,100 PLN/sqm and 13,500 PLN/sqm respectively.
+- Malopolskie and Mazowieckie have the highest median public price per square
+  meter in the sample, at about 13,500 PLN/sqm and 13,100 PLN/sqm respectively.
 - Apartments are priced much higher per square meter than houses in the sample:
-  median public price per square meter is about 14,300 PLN/sqm for apartments
-  versus 7,400 PLN/sqm for houses.
+  median public price per square meter is about 12,200 PLN/sqm for apartments
+  versus 6,900 PLN/sqm for houses.
 - Studio apartments have the highest median price density at about
-  16,200 PLN/sqm, which is consistent with smaller units carrying a higher
+  13,900 PLN/sqm, which is consistent with smaller units carrying a higher
   price per square meter.
-- The public export keeps 99.33% of price targets, exposes public city labels
-  for 75.57% of records, and exposes generalized coordinate-grid locations for
-  13.26% of records after privacy filtering.
+- The public export keeps 98.93% of price targets, exposes public city labels
+  for 76.50% of records, and exposes generalized coordinate-grid locations for
+  12.52% of records after privacy filtering.
 
 Median public price per square meter by voivodeship:
 
 ```mermaid
 xychart-beta
-  x-axis ["Mazowieckie", "Malopolskie", "Dolnoslaskie", "Opolskie"]
+  x-axis ["Malopolskie", "Mazowieckie", "Pomorskie", "Wielkopolskie", "Podkarpackie", "Dolnoslaskie", "Slaskie", "Opolskie"]
   y-axis "PLN per sqm" 0 --> 16000
-  bar [14100, 13500, 7700, 6800]
+  bar [13500, 13100, 10100, 9000, 7900, 7700, 7000, 6800]
 ```
 
 Segment-level comparison:
 
 | Segment | Records | Median public price per sqm |
 | --- | ---: | ---: |
-| Studio apartments | 3,253 | 16,200 PLN |
-| Apartments | 10,385 | 14,300 PLN |
-| Houses | 10,079 | 7,400 PLN |
+| Studio apartments | 7,303 | 13,900 PLN |
+| Apartments | 20,363 | 12,200 PLN |
+| Houses | 21,381 | 6,900 PLN |
 
 Public dataset coverage summary:
 
 | Metric | Value |
 | --- | ---: |
-| Public records | 23,719 |
-| Records with public price target | 99.33% |
-| Records with public city | 75.57% |
-| Records with generalized geo grid | 13.26% |
-| Distinct public cities | 201 |
+| Public records | 49,047 |
+| Records with public price target | 98.93% |
+| Records with public city | 76.50% |
+| Records with generalized geo grid | 12.52% |
+| Distinct public cities | 415 |
 
 Sample public rows:
 

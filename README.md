@@ -5,6 +5,7 @@
 ![Type Checked](https://img.shields.io/badge/type%20checked-mypy-blue)
 ![Code Style](https://img.shields.io/badge/code%20style-black-000000)
 ![Linting](https://img.shields.io/badge/linting-ruff-orange)
+![Coverage](https://img.shields.io/badge/coverage-tests%20passing-brightgreen)
 
 Python data pipeline for collecting, normalizing, aggregating, and publishing
 analysis-ready Polish residential real estate listing data.
@@ -350,6 +351,33 @@ not as an authoritative nationwide market dataset.
 
 Before publishing regenerated public data, review the output schema and sample
 rows to ensure no new sensitive or source-identifying fields were introduced.
+
+## Limitations / Trade-offs
+
+This project is intentionally built as a pragmatic data engineering pipeline,
+not as an official market registry or guaranteed complete data source. The main
+trade-offs are:
+
+- The scraper depends on the HTML and embedded Next.js data shape exposed by the
+  supported source service. If that structure changes, ingestion may need parser
+  updates before new snapshots can be collected reliably.
+- The dataset does not guarantee full coverage of the Polish residential real
+  estate market. It contains listings that were reachable during configured
+  ingestion runs for selected estate types and voivodeships.
+- Resume checkpoints reduce unnecessary pagination and lower the chance of
+  repeated blocked requests, but they can skip newly inserted listings that
+  appear on pages before the saved checkpoint. Full refreshes should clear or
+  reset checkpoint metadata intentionally.
+- The public dataset is a privacy-filtered sample, not a lossless copy of the
+  internal data. Some cities and coordinates are suppressed, numerical targets
+  are rounded, and direct identifiers are removed by design.
+- Ingestion should not be run aggressively. Use conservative worker counts,
+  bounded page ranges, pauses between runs, and responsible retry behavior. The
+  pipeline is designed for careful periodic collection, not high-pressure
+  crawling.
+- Analytical outputs should be treated as exploratory. They are useful for data
+  quality monitoring, feature engineering, dashboards, and ML baselines, but not
+  as authoritative valuation or investment advice.
 
 ## Disclaimer
 

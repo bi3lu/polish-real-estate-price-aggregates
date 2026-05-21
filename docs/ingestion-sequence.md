@@ -7,7 +7,10 @@ sequenceDiagram
     participant CLI as src.utils.cli
     participant Env as src.config.env
     participant Store as src.utils.storage
-    participant Ingestion as src.ingestion.estate_ingestion
+    participant Facade as src.ingestion.estate_ingestion
+    participant Pipeline as src.ingestion.pipeline
+    participant Transport as src.ingestion.transport
+    participant Parsing as src.ingestion.parsing
     participant Source as Listing service
     participant Bronze as data/bronze
 
@@ -18,14 +21,22 @@ sequenceDiagram
     Store-->>CLI: ids by voivodeship
     CLI->>Store: load page checkpoints
     Store-->>CLI: last completed pages
-    CLI->>Ingestion: iter_estates(...)
+    CLI->>Facade: iter_estates(...)
+    Facade->>Pipeline: delegate streaming ingestion
 
     loop estate type x voivodeship x page
-        Ingestion->>Source: fetch listing page
-        Source-->>Ingestion: JSON or embedded Next.js payload
-        Ingestion->>Source: fetch listing detail page when available
-        Source-->>Ingestion: detail payload
-        Ingestion-->>CLI: Estate records
+        Pipeline->>Transport: fetch listing page
+        Transport->>Source: HTTP request
+        Source-->>Transport: JSON or embedded Next.js payload
+        Transport-->>Pipeline: parsed payload
+        Pipeline->>Parsing: extract listing items
+        Pipeline->>Transport: fetch listing detail page when available
+        Transport->>Source: HTTP request
+        Source-->>Transport: detail payload
+        Transport-->>Pipeline: parsed detail payload
+        Pipeline->>Parsing: map listing/detail payload to Estate
+        Pipeline-->>Facade: Estate records
+        Facade-->>CLI: Estate records
     end
 
     CLI->>Store: stream_estates_to_bronze(...)
@@ -37,3 +48,6 @@ sequenceDiagram
 
 The ingestion flow is resumable. Existing external ids prevent duplicate writes,
 and page checkpoints allow later runs to continue from the last completed target.
+The public import surface remains `src.ingestion.estate_ingestion`, but the
+runtime work is delegated to smaller modules for transport, parsing, and
+pagination/thread orchestration.

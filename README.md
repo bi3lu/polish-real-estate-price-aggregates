@@ -52,7 +52,7 @@ Architecture and UML-style diagrams are available in [`docs/`](docs/README.md).
 
 ## Example Insights
 
-The current public export contains 49,047 anonymized listings from selected
+The current public export contains 53,022 anonymized listings from selected
 voivodeships. It is a regional sample rather than a complete national market
 dataset, but it is large enough to demonstrate the analytical outputs produced
 by the pipeline.
@@ -62,45 +62,47 @@ Example findings from the published public dataset:
 - Malopolskie and Mazowieckie have the highest median public price per square
   meter in the sample, at about 13,500 PLN/sqm and 13,100 PLN/sqm respectively.
 - Apartments are priced much higher per square meter than houses in the sample:
-  median public price per square meter is about 12,200 PLN/sqm for apartments
-  versus 6,900 PLN/sqm for houses.
+  median public price per square meter is about 11,800 PLN/sqm for apartments
+  versus 6,800 PLN/sqm for houses.
 - Studio apartments have the highest median price density at about
-  13,900 PLN/sqm, which is consistent with smaller units carrying a higher
+  13,500 PLN/sqm, which is consistent with smaller units carrying a higher
   price per square meter.
-- The public export keeps 98.93% of price targets, exposes public city labels
-  for 76.50% of records, and exposes generalized coordinate-grid locations for
-  12.52% of records after privacy filtering.
+- The public export keeps 98.96% of price targets, exposes public city labels
+  for 76.19% of records, and exposes generalized coordinate-grid locations for
+  12.12% of records after privacy filtering.
 
 Median public price per square meter by voivodeship:
 
 | Rank | Voivodeship | Records | Median public price per sqm |
 | ---: | --- | ---: | ---: |
 | 1 | `malopolskie` | 12,261 | 13,500 PLN |
-| 2 | `mazowieckie` | 6,216 | 13,100 PLN |
+| 2 | `mazowieckie` | 6,213 | 13,100 PLN |
 | 3 | `pomorskie` | 8,074 | 10,100 PLN |
 | 4 | `wielkopolskie` | 2,877 | 9,000 PLN |
-| 5 | `podkarpackie` | 3,725 | 7,900 PLN |
-| 6 | `dolnoslaskie` | 5,933 | 7,700 PLN |
-| 7 | `slaskie` | 7,915 | 7,000 PLN |
-| 8 | `opolskie` | 2,046 | 6,800 PLN |
+| 5 | `lodzkie` | 1,289 | 8,400 PLN |
+| 6 | `podkarpackie` | 4,190 | 8,100 PLN |
+| 7 | `dolnoslaskie` | 5,933 | 7,700 PLN |
+| 8 | `podlaskie` | 2,224 | 7,600 PLN |
+| 9 | `slaskie` | 7,915 | 7,000 PLN |
+| 10 | `opolskie` | 2,046 | 6,800 PLN |
 
 Segment-level comparison:
 
 | Segment | Records | Median public price per sqm |
 | --- | ---: | ---: |
-| Studio apartments | 7,303 | 13,900 PLN |
-| Apartments | 20,363 | 12,200 PLN |
-| Houses | 21,381 | 6,900 PLN |
+| Studio apartments | 7,810 | 13,500 PLN |
+| Apartments | 22,227 | 11,800 PLN |
+| Houses | 22,985 | 6,800 PLN |
 
 Public dataset coverage summary:
 
 | Metric | Value |
 | --- | ---: |
-| Public records | 49,047 |
-| Records with public price target | 98.93% |
-| Records with public city | 76.50% |
-| Records with generalized geo grid | 12.52% |
-| Distinct public cities | 415 |
+| Public records | 53,022 |
+| Records with public price target | 98.96% |
+| Records with public city | 76.19% |
+| Records with generalized geo grid | 12.12% |
+| Distinct public cities | 442 |
 
 Sample public rows:
 
@@ -108,7 +110,7 @@ Sample public rows:
 | --- | --- | --- | --- | --- | ---: |
 | `dom` | `dolnoslaskie` | `Wrocław` | `gte_150` | `gte_1_5m` | 11,800 PLN |
 | `dom` | `dolnoslaskie` | suppressed | `gte_150` | `gte_1_5m` | 7,400 PLN |
-| `mieszkanie` | `opolskie` | suppressed | `lt_35` | `lt_300k` | 3,900 PLN |
+| `dom` | `dolnoslaskie` | suppressed | `100_150` | `750k_1m` | 7,900 PLN |
 
 The same outputs can be used for ranking local markets, comparing property
 segments, auditing missingness, preparing ML features, or publishing a
@@ -290,7 +292,7 @@ and writes timestamped CSV outputs to the next layer.
 │   ├── config/          # Environment loading and global constants
 │   ├── etl/             # Bronze, silver, gold, and public ETL stages
 │   ├── models/          # Pydantic models for each data layer
-│   ├── ingestion/       # Listing ingestion and parsing logic
+│   ├── ingestion/       # Ingestion facade, pipeline, transport, and parsing
 │   └── utils/           # CLI, logging, and storage helpers
 ├── tests/               # Unit tests
 ├── data/
@@ -300,6 +302,12 @@ and writes timestamped CSV outputs to the next layer.
 │   └── public/
 └── .github/workflows/   # CI configuration
 ```
+
+The ingestion package is intentionally split into small modules:
+`estate_ingestion.py` keeps the stable public import path, `pipeline.py`
+orchestrates pagination and threaded streaming, `transport.py` fetches and
+parses source-service payloads, and `parsing.py` maps raw listing/detail data
+into typed `Estate` records.
 
 ## Development
 

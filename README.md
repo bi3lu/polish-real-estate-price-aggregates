@@ -73,12 +73,16 @@ Example findings from the published public dataset:
 
 Median public price per square meter by voivodeship:
 
-```mermaid
-xychart-beta
-  x-axis ["Malopolskie", "Mazowieckie", "Pomorskie", "Wielkopolskie", "Podkarpackie", "Dolnoslaskie", "Slaskie", "Opolskie"]
-  y-axis "PLN per sqm" 0 --> 16000
-  bar [13500, 13100, 10100, 9000, 7900, 7700, 7000, 6800]
-```
+| Rank | Voivodeship | Records | Median public price per sqm |
+| ---: | --- | ---: | ---: |
+| 1 | `malopolskie` | 12,261 | 13,500 PLN |
+| 2 | `mazowieckie` | 6,216 | 13,100 PLN |
+| 3 | `pomorskie` | 8,074 | 10,100 PLN |
+| 4 | `wielkopolskie` | 2,877 | 9,000 PLN |
+| 5 | `podkarpackie` | 3,725 | 7,900 PLN |
+| 6 | `dolnoslaskie` | 5,933 | 7,700 PLN |
+| 7 | `slaskie` | 7,915 | 7,000 PLN |
+| 8 | `opolskie` | 2,046 | 6,800 PLN |
 
 Segment-level comparison:
 

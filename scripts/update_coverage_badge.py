@@ -59,7 +59,6 @@ def _render_badge(coverage_percent: float) -> str:
     value_width = max(42, 10 * len(value) + 12)
     total_width = label_width + value_width
     value_x = label_width + value_width / 2
-    value_text_length = (value_width - 12) * 10
     font_family = "Verdana,Geneva,DejaVu Sans,sans-serif"
 
     return "\n".join(
@@ -99,13 +98,13 @@ def _render_badge(coverage_percent: float) -> str:
             ),
             (
                 f'    <text aria-hidden="true" x="{value_x * 10:.0f}" y="150" '
-                'fill="#010101" fill-opacity=".3" transform="scale(.1)" '
-                f'textLength="{value_text_length:.0f}">{value}</text>'
+                'fill="#010101" fill-opacity=".3" transform="scale(.1)"'
+                f">{value}</text>"
             ),
             (
                 f'    <text x="{value_x * 10:.0f}" y="140" '
-                'transform="scale(.1)" fill="#fff" '
-                f'textLength="{value_text_length:.0f}">{value}</text>'
+                'transform="scale(.1)" fill="#fff"'
+                f">{value}</text>"
             ),
             "  </g>",
             "</svg>",

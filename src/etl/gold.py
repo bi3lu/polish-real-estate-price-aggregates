@@ -12,7 +12,8 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from src.config.globals import GOLD_DATA_DIR, SILVER_DATA_DIR, T
+from src.config.globals import GOLD_DATA_DIR, SILVER_DATA_DIR
+from src.config.types import T
 from src.models.gold_estate import (
     GoldDataQuality,
     GoldGeoAggregate,

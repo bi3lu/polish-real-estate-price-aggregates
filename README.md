@@ -30,6 +30,8 @@ base URLs for the supported service in your local `.env` file.
 - Typed Pydantic models and strict static analysis with `mypy`.
 - Feature engineering, aggregate tables, and data quality outputs for analytics
   and ML workflows.
+- Market ranking CLI for comparing public regional and segment-level price
+  metrics directly from anonymized public exports.
 - Privacy-aware public dataset export with location generalization, rounded
   targets, attribution, and Git LFS tracking.
 - CI coverage for linting, formatting, type checks, and tests.
@@ -52,7 +54,7 @@ Architecture and UML-style diagrams are available in [`docs/`](docs/README.md).
 
 ## Example Insights
 
-The current public export contains 49,047 anonymized listings from selected
+The current public export contains 53,022 anonymized listings from selected
 voivodeships. It is a regional sample rather than a complete national market
 dataset, but it is large enough to demonstrate the analytical outputs produced
 by the pipeline.
@@ -62,45 +64,47 @@ Example findings from the published public dataset:
 - Malopolskie and Mazowieckie have the highest median public price per square
   meter in the sample, at about 13,500 PLN/sqm and 13,100 PLN/sqm respectively.
 - Apartments are priced much higher per square meter than houses in the sample:
-  median public price per square meter is about 12,200 PLN/sqm for apartments
-  versus 6,900 PLN/sqm for houses.
+  median public price per square meter is about 11,800 PLN/sqm for apartments
+  versus 6,800 PLN/sqm for houses.
 - Studio apartments have the highest median price density at about
-  13,900 PLN/sqm, which is consistent with smaller units carrying a higher
+  13,500 PLN/sqm, which is consistent with smaller units carrying a higher
   price per square meter.
-- The public export keeps 98.93% of price targets, exposes public city labels
-  for 76.50% of records, and exposes generalized coordinate-grid locations for
-  12.52% of records after privacy filtering.
+- The public export keeps 98.96% of price targets, exposes public city labels
+  for 76.19% of records, and exposes generalized coordinate-grid locations for
+  12.12% of records after privacy filtering.
 
 Median public price per square meter by voivodeship:
 
 | Rank | Voivodeship | Records | Median public price per sqm |
 | ---: | --- | ---: | ---: |
 | 1 | `malopolskie` | 12,261 | 13,500 PLN |
-| 2 | `mazowieckie` | 6,216 | 13,100 PLN |
+| 2 | `mazowieckie` | 6,213 | 13,100 PLN |
 | 3 | `pomorskie` | 8,074 | 10,100 PLN |
 | 4 | `wielkopolskie` | 2,877 | 9,000 PLN |
-| 5 | `podkarpackie` | 3,725 | 7,900 PLN |
-| 6 | `dolnoslaskie` | 5,933 | 7,700 PLN |
-| 7 | `slaskie` | 7,915 | 7,000 PLN |
-| 8 | `opolskie` | 2,046 | 6,800 PLN |
+| 5 | `lodzkie` | 1,289 | 8,400 PLN |
+| 6 | `podkarpackie` | 4,190 | 8,100 PLN |
+| 7 | `dolnoslaskie` | 5,933 | 7,700 PLN |
+| 8 | `podlaskie` | 2,224 | 7,600 PLN |
+| 9 | `slaskie` | 7,915 | 7,000 PLN |
+| 10 | `opolskie` | 2,046 | 6,800 PLN |
 
 Segment-level comparison:
 
 | Segment | Records | Median public price per sqm |
 | --- | ---: | ---: |
-| Studio apartments | 7,303 | 13,900 PLN |
-| Apartments | 20,363 | 12,200 PLN |
-| Houses | 21,381 | 6,900 PLN |
+| Studio apartments | 7,810 | 13,500 PLN |
+| Apartments | 22,227 | 11,800 PLN |
+| Houses | 22,985 | 6,800 PLN |
 
 Public dataset coverage summary:
 
 | Metric | Value |
 | --- | ---: |
-| Public records | 49,047 |
-| Records with public price target | 98.93% |
-| Records with public city | 76.50% |
-| Records with generalized geo grid | 12.52% |
-| Distinct public cities | 415 |
+| Public records | 53,022 |
+| Records with public price target | 98.96% |
+| Records with public city | 76.19% |
+| Records with generalized geo grid | 12.12% |
+| Distinct public cities | 442 |
 
 Sample public rows:
 
@@ -108,7 +112,7 @@ Sample public rows:
 | --- | --- | --- | --- | --- | ---: |
 | `dom` | `dolnoslaskie` | `Wrocław` | `gte_150` | `gte_1_5m` | 11,800 PLN |
 | `dom` | `dolnoslaskie` | suppressed | `gte_150` | `gte_1_5m` | 7,400 PLN |
-| `mieszkanie` | `opolskie` | suppressed | `lt_35` | `lt_300k` | 3,900 PLN |
+| `dom` | `dolnoslaskie` | suppressed | `100_150` | `750k_1m` | 7,900 PLN |
 
 The same outputs can be used for ranking local markets, comparing property
 segments, auditing missingness, preparing ML features, or publishing a
@@ -124,6 +128,8 @@ privacy-aware dataset without exposing listing-level source identifiers.
 - Silver-to-gold feature engineering and aggregate tables.
 - Gold-to-public anonymization with location suppression, rounded price targets,
   and bucketed attributes.
+- Public market ranking CLI with configurable grouping, sorting, filters, and
+  table, JSON, or CSV output modes.
 - Data quality exports for gold and public layers.
 - Type checking and test coverage through `mypy`, `ruff`, `black`, `isort`, and
   `pytest`.
@@ -223,6 +229,9 @@ Common options:
 | `--voivodeship`, `-v` | Voivodeship slug. Can be repeated or passed as comma-separated values. |
 | `--max-page` | Maximum page to process per estate type and voivodeship combination. |
 | `--workers`, `--threads` | Number of worker threads used across ingestion targets. |
+| `--ignore-checkpoints` | Start selected targets from page 1 instead of saved resume checkpoints while still deduplicating existing bronze ids. |
+| `--duplicate-page-stop-threshold` | Optional stop for consecutive duplicate-only pages. Defaults to `0`, which disables this stop; repeated source pages are still detected. |
+| `--shard-strategy` | Split large searches into smaller source queries. Defaults to `market-price`; use `price` or `none` for narrower control. |
 | `--pretty` | Pretty-print the JSON command output. |
 
 Configured estate types:
@@ -281,16 +290,64 @@ uv run python -m src.etl.public
 Each stage selects the latest input snapshot from the previous layer by default
 and writes timestamped CSV outputs to the next layer.
 
+## Market Ranking CLI
+
+After a public dataset exists, generate quick analytical rankings from the
+latest public ML feature export:
+
+```bash
+uv run python -m src.analytics.market_ranking
+```
+
+The ranking CLI uses only anonymized public fields and supports market
+comparisons by:
+
+- `voivodeship`
+- `city`
+- `estate_type`
+- `voivodeship_city`
+- `voivodeship_estate_type`
+
+It reports listing volume, median and average public price per square meter,
+quartiles, median public total price, and target coverage shares. Output can be
+rendered as a terminal table, JSON, or CSV.
+
+Common examples:
+
+```bash
+uv run python -m src.analytics.market_ranking \
+  --group-by voivodeship \
+  --limit 10
+
+uv run python -m src.analytics.market_ranking \
+  --group-by voivodeship_city \
+  --estate-type mieszkanie \
+  --min-records 50 \
+  --format json
+```
+
+Example table output:
+
+| Rank | Group | Records | Median sqm | Avg sqm | Median price | SQM coverage |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | `malopolskie` | 12,261 | 13,500 PLN | 13,378 PLN | 810,000 PLN | 100.00% |
+| 2 | `mazowieckie` | 6,213 | 13,100 PLN | 17,057 PLN | 850,000 PLN | 99.97% |
+| 3 | `pomorskie` | 8,074 | 10,100 PLN | 11,470 PLN | 800,000 PLN | 100.00% |
+
+More examples are available in
+[`docs/market-ranking.md`](docs/market-ranking.md).
+
 ## Repository Layout
 
 ```text
 .
 ├── main.py
 ├── src/
-│   ├── config/          # Environment loading and global constants
+│   ├── analytics/       # Public-dataset analytical CLIs
+│   ├── config/          # Environment loading, constants, and shared type aliases
 │   ├── etl/             # Bronze, silver, gold, and public ETL stages
 │   ├── models/          # Pydantic models for each data layer
-│   ├── ingestion/       # Listing ingestion and parsing logic
+│   ├── ingestion/       # Ingestion facade, pipeline, transport, and parsing
 │   └── utils/           # CLI, logging, and storage helpers
 ├── tests/               # Unit tests
 ├── data/
@@ -300,6 +357,16 @@ and writes timestamped CSV outputs to the next layer.
 │   └── public/
 └── .github/workflows/   # CI configuration
 ```
+
+The ingestion package is intentionally split into small modules:
+`estate_ingestion.py` keeps the stable public import path, `pipeline.py`
+orchestrates pagination and threaded streaming, `transport.py` fetches and
+parses source-service payloads, and `parsing.py` maps raw listing/detail data
+into typed `Estate` records.
+
+Shared configuration is split between `env.py` for runtime `.env` loading,
+`globals.py` for project constants and field lists, and `types.py` for
+cross-module type aliases used by ingestion, ETL helpers, and analytics CLIs.
 
 ## Development
 
@@ -421,7 +488,8 @@ trade-offs are:
 - Ingestion should not be run aggressively. Use conservative worker counts,
   bounded page ranges, pauses between runs, and responsible retry behavior. The
   pipeline is designed for careful periodic collection, not high-pressure
-  crawling.
+  crawling. If the source responds with `403` or `429`, the transport layer
+  backs off with a shared cooldown before retrying.
 - Analytical outputs should be treated as exploratory. They are useful for data
   quality monitoring, feature engineering, dashboards, and ML baselines, but not
   as authoritative valuation or investment advice.

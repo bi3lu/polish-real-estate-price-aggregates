@@ -30,6 +30,8 @@ base URLs for the supported service in your local `.env` file.
 - Typed Pydantic models and strict static analysis with `mypy`.
 - Feature engineering, aggregate tables, and data quality outputs for analytics
   and ML workflows.
+- Market ranking CLI for comparing public regional and segment-level price
+  metrics directly from anonymized public exports.
 - Privacy-aware public dataset export with location generalization, rounded
   targets, attribution, and Git LFS tracking.
 - CI coverage for linting, formatting, type checks, and tests.
@@ -126,6 +128,8 @@ privacy-aware dataset without exposing listing-level source identifiers.
 - Silver-to-gold feature engineering and aggregate tables.
 - Gold-to-public anonymization with location suppression, rounded price targets,
   and bucketed attributes.
+- Public market ranking CLI with configurable grouping, sorting, filters, and
+  table, JSON, or CSV output modes.
 - Data quality exports for gold and public layers.
 - Type checking and test coverage through `mypy`, `ruff`, `black`, `isort`, and
   `pytest`.
@@ -283,12 +287,60 @@ uv run python -m src.etl.public
 Each stage selects the latest input snapshot from the previous layer by default
 and writes timestamped CSV outputs to the next layer.
 
+## Market Ranking CLI
+
+After a public dataset exists, generate quick analytical rankings from the
+latest public ML feature export:
+
+```bash
+uv run python -m src.analytics.market_ranking
+```
+
+The ranking CLI uses only anonymized public fields and supports market
+comparisons by:
+
+- `voivodeship`
+- `city`
+- `estate_type`
+- `voivodeship_city`
+- `voivodeship_estate_type`
+
+It reports listing volume, median and average public price per square meter,
+quartiles, median public total price, and target coverage shares. Output can be
+rendered as a terminal table, JSON, or CSV.
+
+Common examples:
+
+```bash
+uv run python -m src.analytics.market_ranking \
+  --group-by voivodeship \
+  --limit 10
+
+uv run python -m src.analytics.market_ranking \
+  --group-by voivodeship_city \
+  --estate-type mieszkanie \
+  --min-records 50 \
+  --format json
+```
+
+Example table output:
+
+| Rank | Group | Records | Median sqm | Avg sqm | Median price | SQM coverage |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | `malopolskie` | 12,261 | 13,500 PLN | 13,378 PLN | 810,000 PLN | 100.00% |
+| 2 | `mazowieckie` | 6,213 | 13,100 PLN | 17,057 PLN | 850,000 PLN | 99.97% |
+| 3 | `pomorskie` | 8,074 | 10,100 PLN | 11,470 PLN | 800,000 PLN | 100.00% |
+
+More examples are available in
+[`docs/market-ranking.md`](docs/market-ranking.md).
+
 ## Repository Layout
 
 ```text
 .
 ├── main.py
 ├── src/
+│   ├── analytics/       # Public-dataset analytical CLIs
 │   ├── config/          # Environment loading and global constants
 │   ├── etl/             # Bronze, silver, gold, and public ETL stages
 │   ├── models/          # Pydantic models for each data layer

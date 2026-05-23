@@ -16,6 +16,7 @@ flowchart TD
     gold[(data/gold<br/>features + aggregates + quality)]
     public_etl[src.etl.public]
     public[(data/public<br/>anonymized CSV + quality)]
+    market_ranking[src.analytics.market_ranking<br/>market rankings]
     public_readme[data/public/README.md]
 
     env --> cli
@@ -31,6 +32,7 @@ flowchart TD
     gold_etl --> gold
     gold --> public_etl
     public_etl --> public
+    public --> market_ranking
     public --> public_readme
 ```
 
@@ -41,6 +43,7 @@ The pipeline follows a layered data engineering pattern:
 - `gold`: model-ready features, geographic aggregates, segment aggregates, and
   quality metrics.
 - `public`: anonymized records designed for safe public analysis.
+- `analytics`: command-line summaries and rankings derived from public data.
 
 Ingestion is implemented as a small facade plus focused internal modules. The
 facade preserves the historical import path, while `pipeline`, `transport`, and

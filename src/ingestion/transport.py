@@ -3,18 +3,28 @@
 from __future__ import annotations
 
 import json
+import random
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Mapping
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from html import unescape
 from html.parser import HTMLParser
+from threading import Lock
 from typing import Any, cast
 
 from src.config.globals import (
     HEADERS,
     MAIN_URL,
+    REQUEST_BLOCK_BACKOFF_MULTIPLIER,
+    REQUEST_BLOCK_COOLDOWN_MAX_SECONDS,
+    REQUEST_BLOCK_COOLDOWN_SECONDS,
+    REQUEST_BLOCK_JITTER_SECONDS,
+    REQUEST_BLOCK_RETRIES,
+    REQUEST_BLOCK_STATUS_CODES,
     REQUEST_RETRIES,
     REQUEST_RETRY_SLEEP_SECONDS,
     REQUEST_TIMEOUT_SECONDS,
@@ -22,6 +32,62 @@ from src.config.globals import (
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+class SourceBlockedError(RuntimeError):
+    """Raised when source anti-abuse responses outlast configured cooldowns."""
+
+    def __init__(
+        self,
+        url: str,
+        *,
+        status_code: int,
+        attempts: int,
+    ) -> None:
+        super().__init__(
+            f"Source returned HTTP {status_code} for {url} after {attempts} "
+            "cooldown attempts"
+        )
+        self.url = url
+        self.status_code = status_code
+        self.attempts = attempts
+
+
+class RequestThrottle:
+    """Shared cooldown gate used by concurrent request workers."""
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._blocked_until = 0.0
+
+    def wait_if_needed(self) -> None:
+        """Sleep while a source-wide cooldown is active."""
+        while True:
+            with self._lock:
+                sleep_seconds = self._blocked_until - time.monotonic()
+
+            if sleep_seconds <= 0:
+                return
+
+            logger.warning(
+                "Source cooldown active; sleeping %.1f seconds before next request",
+                sleep_seconds,
+            )
+            time.sleep(sleep_seconds)
+
+    def register_block(self, cooldown_seconds: float) -> None:
+        """Extend the shared cooldown window."""
+        if cooldown_seconds <= 0:
+            return
+
+        with self._lock:
+            self._blocked_until = max(
+                self._blocked_until,
+                time.monotonic() + cooldown_seconds,
+            )
+
+
+DEFAULT_REQUEST_THROTTLE = RequestThrottle()
 
 
 class _NextDataHTMLParser(HTMLParser):
@@ -62,6 +128,7 @@ def build_listing_url(
     *,
     page: int = 1,
     main_url: str = MAIN_URL,
+    query_params: Mapping[str, str] | None = None,
 ) -> str:
     """Build a listing URL for a sale search page.
 
@@ -70,6 +137,7 @@ def build_listing_url(
         voivodeship: Voivodeship slug.
         page: One-based listing page number.
         main_url: Base listing search URL.
+        query_params: Additional search filter query parameters.
 
     Returns:
         Fully qualified listing URL.
@@ -82,7 +150,12 @@ def build_listing_url(
 
     base_url = main_url.rstrip("/") + "/"
     path_url = urllib.parse.urljoin(base_url, f"{estate_type}/{voivodeship}")
-    query = urllib.parse.urlencode({"viewType": "listing", "page": page})
+    query_values = {
+        "viewType": "listing",
+        "page": str(page),
+        **dict(query_params or {}),
+    }
+    query = urllib.parse.urlencode(query_values)
 
     return f"{path_url}?{query}"
 
@@ -121,6 +194,13 @@ def fetch_next_data_json(
     timeout_seconds: int = REQUEST_TIMEOUT_SECONDS,
     retries: int = REQUEST_RETRIES,
     retry_sleep_seconds: float = REQUEST_RETRY_SLEEP_SECONDS,
+    block_status_codes: frozenset[int] = REQUEST_BLOCK_STATUS_CODES,
+    block_retries: int = REQUEST_BLOCK_RETRIES,
+    block_cooldown_seconds: float = REQUEST_BLOCK_COOLDOWN_SECONDS,
+    block_cooldown_max_seconds: float = REQUEST_BLOCK_COOLDOWN_MAX_SECONDS,
+    block_backoff_multiplier: float = REQUEST_BLOCK_BACKOFF_MULTIPLIER,
+    block_jitter_seconds: float = REQUEST_BLOCK_JITTER_SECONDS,
+    throttle: RequestThrottle | None = DEFAULT_REQUEST_THROTTLE,
 ) -> dict[str, Any]:
     """Fetch JSON or embedded Next.js data from a page.
 
@@ -130,6 +210,13 @@ def fetch_next_data_json(
         timeout_seconds: Socket timeout in seconds.
         retries: Number of request attempts.
         retry_sleep_seconds: Delay between failed attempts.
+        block_status_codes: HTTP status codes treated as source throttling.
+        block_retries: Number of cooldown attempts allowed for source blocks.
+        block_cooldown_seconds: Initial cooldown for source block responses.
+        block_cooldown_max_seconds: Maximum cooldown after backoff.
+        block_backoff_multiplier: Multiplier used between block cooldowns.
+        block_jitter_seconds: Random jitter added to block cooldowns.
+        throttle: Optional shared throttle used across concurrent workers.
 
     Returns:
         Parsed JSON object from the response.
@@ -138,8 +225,14 @@ def fetch_next_data_json(
         RuntimeError: If all request attempts fail.
     """
     last_error: BaseException | None = None
+    attempt = 0
+    block_attempt = 0
 
-    for attempt in range(1, retries + 1):
+    while attempt < retries:
+        if throttle is not None:
+            throttle.wait_if_needed()
+
+        attempt += 1
         request = urllib.request.Request(url, headers=dict(headers))
 
         try:
@@ -163,6 +256,44 @@ def fetch_next_data_json(
 
             if exc.code == 404:
                 raise RuntimeError(f"Could not fetch listing data for {url}") from exc
+
+            if exc.code in block_status_codes:
+                block_attempt += 1
+
+                if block_attempt > block_retries:
+                    raise SourceBlockedError(
+                        url,
+                        status_code=exc.code,
+                        attempts=block_attempt - 1,
+                    ) from exc
+
+                cooldown_seconds = _block_cooldown_seconds(
+                    exc,
+                    attempt=block_attempt,
+                    base_seconds=block_cooldown_seconds,
+                    max_seconds=block_cooldown_max_seconds,
+                    multiplier=block_backoff_multiplier,
+                    jitter_seconds=block_jitter_seconds,
+                )
+                logger.warning(
+                    "Source returned HTTP %s for %s; cooldown %.1f seconds "
+                    "before retrying blocked request (%s/%s)",
+                    exc.code,
+                    url,
+                    cooldown_seconds,
+                    block_attempt,
+                    block_retries,
+                )
+
+                if throttle is None:
+                    time.sleep(cooldown_seconds)
+
+                else:
+                    throttle.register_block(cooldown_seconds)
+                    throttle.wait_if_needed()
+
+                attempt = 0
+                continue
 
             logger.warning(
                 "Fetching listing data failed on attempt %s/%s for %s: %s",
@@ -194,3 +325,50 @@ def fetch_next_data_json(
                 time.sleep(retry_sleep_seconds)
 
     raise RuntimeError(f"Could not fetch listing data for {url}") from last_error
+
+
+def _block_cooldown_seconds(
+    exc: urllib.error.HTTPError,
+    *,
+    attempt: int,
+    base_seconds: float,
+    max_seconds: float,
+    multiplier: float,
+    jitter_seconds: float,
+) -> float:
+    retry_after_seconds = _retry_after_seconds(exc)
+
+    if retry_after_seconds is not None:
+        cooldown_seconds = retry_after_seconds
+
+    else:
+        cooldown_seconds = base_seconds * (multiplier ** max(attempt - 1, 0))
+
+    if jitter_seconds > 0:
+        cooldown_seconds += random.uniform(0, jitter_seconds)
+
+    return max(0.0, min(cooldown_seconds, max_seconds))
+
+
+def _retry_after_seconds(exc: urllib.error.HTTPError) -> float | None:
+    retry_after = exc.headers.get("Retry-After")
+
+    if retry_after is None:
+        return None
+
+    try:
+        return max(0.0, float(retry_after))
+
+    except ValueError:
+        pass
+
+    try:
+        retry_at = parsedate_to_datetime(retry_after)
+
+    except (TypeError, ValueError):
+        return None
+
+    if retry_at.tzinfo is None:
+        retry_at = retry_at.replace(tzinfo=timezone.utc)
+
+    return max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())

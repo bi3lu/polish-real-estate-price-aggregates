@@ -11,7 +11,8 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from src.config.globals import DEFAULT_MIN_GROUP_SIZE, GOLD_DATA_DIR, PUBLIC_DATA_DIR, T
+from src.config.globals import DEFAULT_MIN_GROUP_SIZE, GOLD_DATA_DIR, PUBLIC_DATA_DIR
+from src.config.types import T
 from src.models.gold_estate import GoldListingFeature
 from src.models.public_estate import PublicDataQuality, PublicListingFeature
 from src.utils.logger import get_logger

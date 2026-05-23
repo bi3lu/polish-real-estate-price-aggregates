@@ -229,6 +229,9 @@ Common options:
 | `--voivodeship`, `-v` | Voivodeship slug. Can be repeated or passed as comma-separated values. |
 | `--max-page` | Maximum page to process per estate type and voivodeship combination. |
 | `--workers`, `--threads` | Number of worker threads used across ingestion targets. |
+| `--ignore-checkpoints` | Start selected targets from page 1 instead of saved resume checkpoints while still deduplicating existing bronze ids. |
+| `--duplicate-page-stop-threshold` | Optional stop for consecutive duplicate-only pages. Defaults to `0`, which disables this stop; repeated source pages are still detected. |
+| `--shard-strategy` | Split large searches into smaller source queries. Defaults to `market-price`; use `price` or `none` for narrower control. |
 | `--pretty` | Pretty-print the JSON command output. |
 
 Configured estate types:
@@ -341,7 +344,7 @@ More examples are available in
 ├── main.py
 ├── src/
 │   ├── analytics/       # Public-dataset analytical CLIs
-│   ├── config/          # Environment loading and global constants
+│   ├── config/          # Environment loading, constants, and shared type aliases
 │   ├── etl/             # Bronze, silver, gold, and public ETL stages
 │   ├── models/          # Pydantic models for each data layer
 │   ├── ingestion/       # Ingestion facade, pipeline, transport, and parsing
@@ -360,6 +363,10 @@ The ingestion package is intentionally split into small modules:
 orchestrates pagination and threaded streaming, `transport.py` fetches and
 parses source-service payloads, and `parsing.py` maps raw listing/detail data
 into typed `Estate` records.
+
+Shared configuration is split between `env.py` for runtime `.env` loading,
+`globals.py` for project constants and field lists, and `types.py` for
+cross-module type aliases used by ingestion, ETL helpers, and analytics CLIs.
 
 ## Development
 
@@ -481,7 +488,8 @@ trade-offs are:
 - Ingestion should not be run aggressively. Use conservative worker counts,
   bounded page ranges, pauses between runs, and responsible retry behavior. The
   pipeline is designed for careful periodic collection, not high-pressure
-  crawling.
+  crawling. If the source responds with `403` or `429`, the transport layer
+  backs off with a shared cooldown before retrying.
 - Analytical outputs should be treated as exploratory. They are useful for data
   quality monitoring, feature engineering, dashboards, and ML baselines, but not
   as authoritative valuation or investment advice.

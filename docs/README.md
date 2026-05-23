@@ -9,8 +9,8 @@ runtime flows of the Polish Real Estate Price Aggregates project.
   pipeline, and public outputs.
 - [Data Pipeline](data-pipeline.md) - bronze, silver, gold, and public data
   layers.
-- [Component Diagram](component-diagram.md) - main Python packages, ingestion
-  internals, and their dependencies.
+- [Component Diagram](component-diagram.md) - main Python packages, shared
+  config/type modules, ingestion internals, and their dependencies.
 - [Ingestion Sequence](ingestion-sequence.md) - command-line ingestion flow with
   resume checkpoints.
 - [ETL Sequence](etl-sequence.md) - transformation flow from bronze to public

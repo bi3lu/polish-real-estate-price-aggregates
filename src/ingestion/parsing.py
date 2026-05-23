@@ -45,7 +45,59 @@ def extract_listing_items(next_data_json: Mapping[str, Any]) -> list[dict[str, A
                 cast(dict[str, Any], item) for item in value if isinstance(item, dict)
             ]
 
-    return []
+    return _find_listing_items_recursively(next_data_json)
+
+
+def _find_listing_items_recursively(data: Any) -> list[dict[str, Any]]:
+    candidate_lists: list[list[dict[str, Any]]] = []
+
+    def collect(value: Any, *, parent_key: str | None = None) -> None:
+        if isinstance(value, Mapping):
+            for key, nested_value in value.items():
+                collect(nested_value, parent_key=str(key))
+
+            return
+
+        if isinstance(value, list):
+            listing_items = [
+                cast(dict[str, Any], item)
+                for item in value
+                if isinstance(item, dict) and _looks_like_listing_item(item)
+            ]
+
+            if listing_items and parent_key in {"items", "ads", "results"}:
+                candidate_lists.append(listing_items)
+
+            for item in value:
+                collect(item, parent_key=parent_key)
+
+    collect(data)
+
+    if not candidate_lists:
+        return []
+
+    return max(candidate_lists, key=len)
+
+
+def _looks_like_listing_item(item: Mapping[str, Any]) -> bool:
+    has_identifier = any(
+        key in item for key in ("id", "adId", "estateId", "externalId", "offerId")
+    )
+    has_listing_field = any(
+        key in item
+        for key in (
+            "title",
+            "name",
+            "headline",
+            "href",
+            "url",
+            "link",
+            "slug",
+            "urlSlug",
+        )
+    )
+
+    return has_identifier and has_listing_field
 
 
 def extract_estate_detail(next_data_json: Mapping[str, Any]) -> dict[str, Any] | None:

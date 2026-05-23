@@ -12,7 +12,14 @@ from threading import Lock
 from typing import TextIO
 
 from src.config.env import get_required_env_file_value
-from src.config.globals import DEFAULT_WORKERS, ESTATE_TYPES, MAX_PAGE, VOIVODESHIPS
+from src.config.globals import (
+    DEFAULT_SEARCH_SHARD_STRATEGY,
+    DEFAULT_WORKERS,
+    ESTATE_TYPES,
+    MAX_PAGE,
+    RESUME_DUPLICATE_PAGE_STOP_THRESHOLD,
+    VOIVODESHIPS,
+)
 from src.ingestion.estate_ingestion import iter_estates
 from src.models.estate import Estate
 from src.utils.logger import get_logger
@@ -34,6 +41,9 @@ class CliOptions:
     max_page: int
     workers: int
     pretty: bool
+    ignore_checkpoints: bool
+    duplicate_page_stop_threshold: int
+    search_shard_strategy: str
 
 
 IngestFn = Callable[..., Iterable[Estate]]
@@ -96,6 +106,34 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Pretty-print JSON output.",
     )
+    parser.add_argument(
+        "--ignore-checkpoints",
+        action="store_true",
+        help=(
+            "Start selected ingestion targets from page 1 instead of using saved "
+            "resume page checkpoints. Existing bronze ids are still deduplicated."
+        ),
+    )
+    parser.add_argument(
+        "--duplicate-page-stop-threshold",
+        type=_non_negative_int,
+        default=RESUME_DUPLICATE_PAGE_STOP_THRESHOLD,
+        help=(
+            "Stop a resume/refresh target after this many consecutive pages "
+            "containing only duplicate listings. Use 0 to disable this stop; "
+            "repeated listing pages are still detected. Defaults to "
+            f"{RESUME_DUPLICATE_PAGE_STOP_THRESHOLD}."
+        ),
+    )
+    parser.add_argument(
+        "--shard-strategy",
+        choices=("none", "price", "market-price"),
+        default=DEFAULT_SEARCH_SHARD_STRATEGY,
+        help=(
+            "Split large source searches into smaller listing queries. "
+            f"Defaults to {DEFAULT_SEARCH_SHARD_STRATEGY}."
+        ),
+    )
 
     return parser
 
@@ -128,6 +166,9 @@ def parse_cli_args(args: Sequence[str] | None = None) -> CliOptions:
             max_page=namespace.max_page,
             workers=namespace.workers,
             pretty=namespace.pretty,
+            ignore_checkpoints=namespace.ignore_checkpoints,
+            duplicate_page_stop_threshold=namespace.duplicate_page_stop_threshold,
+            search_shard_strategy=namespace.shard_strategy,
         )
 
     except argparse.ArgumentTypeError as exc:
@@ -182,7 +223,9 @@ def run_cli(
         "Loaded %s existing bronze external ids for selected voivodeships",
         selected_existing_count,
     )
-    start_pages_by_target = page_checkpoints_loader()
+    start_pages_by_target = (
+        {} if options.ignore_checkpoints else page_checkpoints_loader()
+    )
     page_checkpoints_by_voivodeship: dict[str, dict[str, int]] = {}
     page_checkpoint_lock = Lock()
 
@@ -207,6 +250,8 @@ def run_cli(
         workers=options.workers,
         existing_external_ids_by_voivodeship=existing_external_ids_by_voivodeship,
         start_pages_by_target=start_pages_by_target,
+        duplicate_page_stop_threshold=options.duplicate_page_stop_threshold,
+        search_shard_strategy=options.search_shard_strategy,
         progress_callback=progress_callback,
     )
     output_path, count = saver(
@@ -224,6 +269,9 @@ def run_cli(
             "estate_types": list(options.estate_types),
             "voivodeships": list(options.voivodeships),
             "workers": options.workers,
+            "ignore_checkpoints": options.ignore_checkpoints,
+            "duplicate_page_stop_threshold": options.duplicate_page_stop_threshold,
+            "search_shard_strategy": options.search_shard_strategy,
         },
         stdout,
         ensure_ascii=False,
@@ -276,5 +324,14 @@ def _positive_int(value: str) -> int:
 
     if parsed_value < 1:
         raise argparse.ArgumentTypeError("value must be greater than or equal to 1")
+
+    return parsed_value
+
+
+def _non_negative_int(value: str) -> int:
+    parsed_value = int(value)
+
+    if parsed_value < 0:
+        raise argparse.ArgumentTypeError("value must be greater than or equal to 0")
 
     return parsed_value

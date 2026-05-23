@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from src.config.types import IngestionProgressCallback
 from src.ingestion.parsing import (
     extract_estate_detail,
     extract_listing_items,
     get_estate_info,
 )
 from src.ingestion.pipeline import (
-    IngestionProgressCallback,
+    SearchShard,
+    build_search_shards,
     ingest_estates,
     ingest_estates_for,
     iter_estates,
@@ -16,6 +18,8 @@ from src.ingestion.pipeline import (
     iter_estates_threaded,
 )
 from src.ingestion.transport import (
+    RequestThrottle,
+    SourceBlockedError,
     build_listing_url,
     extract_next_data_from_html,
     fetch_next_data_json,
@@ -24,7 +28,11 @@ from src.utils.logger import get_logger
 
 __all__ = [
     "IngestionProgressCallback",
+    "RequestThrottle",
+    "SearchShard",
+    "SourceBlockedError",
     "build_listing_url",
+    "build_search_shards",
     "extract_estate_detail",
     "extract_listing_items",
     "extract_next_data_from_html",

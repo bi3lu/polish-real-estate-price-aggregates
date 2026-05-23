@@ -1,1 +1,1 @@
-"""Configuration helpers and project-wide constants."""
+"""Configuration helpers, project-wide constants and types."""

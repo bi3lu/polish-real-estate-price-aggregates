@@ -120,7 +120,9 @@ def test_run_cli_calls_ingester_with_selected_filters_and_prints_json() -> None:
         "duplicate_page_stop_threshold": 0,
         "search_shard_strategy": "market-price",
         "progress_callback": captured_kwargs["progress_callback"],
+        "sources": captured_kwargs["sources"],
     }
+    assert [source.source_id for source in captured_kwargs["sources"]] == ["source_a"]
     assert captured_save_kwargs["estate_types"] == ("mieszkanie",)
     assert captured_save_kwargs["voivodeships"] == ("mazowieckie",)
     assert captured_save_kwargs["max_page"] == 2
@@ -137,6 +139,7 @@ def test_run_cli_calls_ingester_with_selected_filters_and_prints_json() -> None:
         "ignore_checkpoints": False,
         "duplicate_page_stop_threshold": 0,
         "search_shard_strategy": "market-price",
+        "source_ids": ["source_a"],
     }
 
 

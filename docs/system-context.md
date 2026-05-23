@@ -9,7 +9,7 @@ flowchart LR
     public[Anonymized public CSV dataset]
     ci[GitHub Actions CI]
 
-    user -->|configures .env and runs commands| repo
+    user -->|configures sources.local.yaml and runs commands| repo
     source -->|listing result and detail pages| repo
     repo -->|bronze, silver, gold, public outputs| local
     local -->|selected anonymized files| public
@@ -18,5 +18,6 @@ flowchart LR
     public -->|analysis, research, ML experiments| user
 ```
 
-The source service is intentionally described generically. Runtime URLs are
-provided locally through `.env` and are not committed to the repository.
+The source service is intentionally described generically. Runtime source
+definitions are provided locally through `config/sources.local.yaml` and are not
+committed to the repository.

@@ -5,7 +5,7 @@ sequenceDiagram
     actor User
     participant Main as main.py
     participant CLI as src.utils.cli
-    participant Env as src.config.env
+    participant Config as src.config.source_config
     participant Store as src.utils.storage
     participant Facade as src.ingestion.estate_ingestion
     participant Pipeline as src.ingestion.pipeline
@@ -16,7 +16,7 @@ sequenceDiagram
 
     User->>Main: uv run python main.py
     Main->>CLI: main(args)
-    CLI->>Env: validate MAIN_URL and ESTATE_URL
+    CLI->>Config: load and validate sources YAML
     CLI->>Store: load existing external ids
     Store-->>CLI: ids by voivodeship
     CLI->>Store: load page checkpoints
@@ -24,7 +24,7 @@ sequenceDiagram
     CLI->>Facade: iter_estates(...)
     Facade->>Pipeline: delegate streaming ingestion
 
-    loop estate type x voivodeship x shard x page
+    loop source x estate type x voivodeship x shard x page
         Pipeline->>Transport: fetch listing page
         Transport->>Source: HTTP request
         Source-->>Transport: JSON or embedded Next.js payload
@@ -34,9 +34,9 @@ sequenceDiagram
         Transport->>Source: HTTP request
         Source-->>Transport: detail payload
         Transport-->>Pipeline: parsed detail payload
-        Pipeline->>Parsing: map listing/detail payload to Estate
-        Pipeline-->>Facade: Estate records
-        Facade-->>CLI: Estate records
+        Pipeline->>Parsing: map listing/detail payload to RawListingObservation
+        Pipeline-->>Facade: raw observations
+        Facade-->>CLI: raw observations
     end
 
     CLI->>Store: stream_estates_to_bronze(...)

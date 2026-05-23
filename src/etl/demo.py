@@ -268,7 +268,7 @@ def _estate(
         attributes["Terrain_area"] = str(terrain_area_sqm)
 
     return Estate(
-        source="demo_fixture",
+        source_id="demo_fixture",
         external_id=external_id,
         url=f"https://example.invalid/demo/{external_id}",
         title=title,

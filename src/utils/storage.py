@@ -9,14 +9,14 @@ from pathlib import Path
 from typing import Any
 
 from src.config.globals import BRONZE_DATA_DIR, BRONZE_STREAM_CHECKPOINT_INTERVAL
-from src.models.estate import Estate
+from src.ingestion.models import RawListingObservation
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
 def save_estates_to_bronze(
-    estates: list[Estate],
+    estates: list[RawListingObservation],
     *,
     estate_types: tuple[str, ...],
     voivodeships: tuple[str, ...],
@@ -27,7 +27,7 @@ def save_estates_to_bronze(
     """Write estates to a single JSON bronze snapshot.
 
     Args:
-        estates: Estate records to serialize.
+        estates: Raw listing observations to serialize.
         estate_types: Estate type filters represented in the snapshot.
         voivodeships: Voivodeship filters represented in the snapshot.
         max_page: Maximum page used during ingestion.
@@ -62,7 +62,7 @@ def save_estates_to_bronze(
 
 
 def stream_estates_to_bronze(
-    estates: Iterable[Estate],
+    estates: Iterable[RawListingObservation],
     *,
     estate_types: tuple[str, ...],
     voivodeships: tuple[str, ...],
@@ -74,7 +74,7 @@ def stream_estates_to_bronze(
     """Stream estates into canonical per-voivodeship JSONL bronze files.
 
     Args:
-        estates: Estate records to persist.
+        estates: Raw listing observations to persist.
         estate_types: Estate type filters represented in the manifest.
         voivodeships: Voivodeship filters represented in the manifest.
         max_page: Maximum page used during ingestion.
@@ -107,7 +107,10 @@ def stream_estates_to_bronze(
     try:
         for estate in estates:
             voivodeship = estate.voivodeship or "unknown"
-            external_id = str(estate.external_id)
+            external_id = _bronze_dedupe_key(
+                source_id=estate.source_id,
+                external_id=estate.external_id,
+            )
             voivodeship_seen_ids = seen_external_ids.setdefault(voivodeship, set())
 
             if external_id in voivodeship_seen_ids:
@@ -263,11 +266,17 @@ def load_bronze_external_ids_by_voivodeship(
         for estate_data in _iter_bronze_estate_payloads(snapshot_path):
             external_id = estate_data.get("external_id")
             voivodeship = estate_data.get("voivodeship")
+            source_id = estate_data.get("source_id") or estate_data.get("source")
 
             if external_id is None or voivodeship is None:
                 continue
 
-            external_ids.setdefault(str(voivodeship), set()).add(str(external_id))
+            external_ids.setdefault(str(voivodeship), set()).add(
+                _bronze_dedupe_key(
+                    source_id=str(source_id or "source_a"),
+                    external_id=str(external_id),
+                )
+            )
 
     return external_ids
 
@@ -492,6 +501,10 @@ def _canonical_voivodeship_snapshot_path(
     voivodeship: str,
 ) -> Path:
     return output_dir / voivodeship / _build_canonical_voivodeship_filename(voivodeship)
+
+
+def _bronze_dedupe_key(*, source_id: str, external_id: str) -> str:
+    return f"{source_id}:{external_id}"
 
 
 def _build_snapshot_filename(scraped_at: datetime) -> str:

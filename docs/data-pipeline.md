@@ -2,13 +2,14 @@
 
 ```mermaid
 flowchart TD
-    env[.env configuration<br/>MAIN_URL and ESTATE_URL]
+    source_config[config/sources*.yaml<br/>source definitions]
     config_types[src.config.types<br/>shared type aliases]
+    config_loader[src.config.source_config<br/>Pydantic validation]
     cli[main.py / src.utils.cli]
     ingestion[src.ingestion.estate_ingestion<br/>compatibility facade]
     ingestion_pipeline[src.ingestion.pipeline<br/>pagination + resume]
     ingestion_transport[src.ingestion.transport<br/>listing/detail fetch]
-    ingestion_parsing[src.ingestion.parsing<br/>Estate mapping]
+    ingestion_parsing[src.ingestion.parsing<br/>raw observation mapping]
     bronze_storage[src.utils.storage]
     bronze[(data/bronze<br/>JSONL snapshots + manifest)]
     silver_etl[src.etl.silver]
@@ -20,7 +21,8 @@ flowchart TD
     market_ranking[src.analytics.market_ranking<br/>market rankings]
     public_readme[data/public/README.md]
 
-    env --> cli
+    source_config --> config_loader
+    config_loader --> cli
     config_types --> cli
     config_types --> ingestion_pipeline
     config_types --> market_ranking

@@ -13,7 +13,7 @@ sequenceDiagram
 
     User->>Silver: uv run python -m src.etl.silver
     Silver->>BronzeData: load latest manifest or snapshot
-    Silver->>Silver: validate and normalize Estate records
+    Silver->>Silver: validate raw observations and build CanonicalListing
     Silver->>SilverData: write estate_silver_*.csv
 
     User->>Gold: uv run python -m src.etl.gold

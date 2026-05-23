@@ -2,8 +2,8 @@
 
 ```mermaid
 classDiagram
-    class Estate {
-        source: str
+    class RawListingObservation {
+        source_id: str
         external_id: str
         url: str?
         title: str?
@@ -13,9 +13,9 @@ classDiagram
         attributes: dict
     }
 
-    class SilverEstate {
+    class CanonicalListing {
         record_id: str
-        source: str
+        source_id: str
         external_id: str
         price_pln: float?
         price_per_sqm_pln: float?
@@ -70,8 +70,8 @@ classDiagram
         processed_at: str
     }
 
-    Estate --> SilverEstate : normalize
-    SilverEstate --> GoldListingFeature : feature engineering
+    RawListingObservation --> CanonicalListing : normalize
+    CanonicalListing --> GoldListingFeature : feature engineering
     GoldListingFeature --> GoldGeoAggregate : aggregate by geo
     GoldListingFeature --> GoldSegmentAggregate : aggregate by segment
     GoldListingFeature --> GoldDataQuality : measure quality

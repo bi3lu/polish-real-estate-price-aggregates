@@ -17,6 +17,13 @@ from src.ingestion.pipeline import (
     iter_estates_for,
     iter_estates_threaded,
 )
+from src.ingestion.models import (
+    CanonicalListing,
+    RawListingObservation,
+    SourceQualityStats,
+    SourceRun,
+    SourceRunStats,
+)
 from src.ingestion.transport import (
     RequestThrottle,
     SourceBlockedError,
@@ -43,6 +50,11 @@ __all__ = [
     "iter_estates",
     "iter_estates_for",
     "iter_estates_threaded",
+    "CanonicalListing",
+    "RawListingObservation",
+    "SourceQualityStats",
+    "SourceRun",
+    "SourceRunStats",
 ]
 
 logger = get_logger(__name__)

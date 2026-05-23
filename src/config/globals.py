@@ -6,13 +6,13 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.config.env import PROJECT_ROOT, get_env_file_value
+from src.config.env import PROJECT_ROOT
 
 #######################################################################################
 # Estate globals:
 #######################################################################################
 
-SERVICE_SOURCE: str = get_env_file_value("SERVICE_SOURCE", "estate_service")
+DEFAULT_SOURCE_ID: str = "source_a"
 
 #######################################################################################
 # Estate normalization maps:
@@ -98,8 +98,8 @@ ADDITIONAL_FEATURES: frozenset[str] = frozenset(
 # HTTP globals:
 #######################################################################################
 
-MAIN_URL: str = get_env_file_value("MAIN_URL", "https://example.invalid/results/")
-ESTATE_URL: str = get_env_file_value("ESTATE_URL", "https://example.invalid/estate/")
+MAIN_URL: str = "https://example-listing-site.local/search"
+ESTATE_URL: str = "https://example-listing-site.local"
 
 #######################################################################################
 # Ingestion pagination and resume limits:

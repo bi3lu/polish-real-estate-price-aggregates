@@ -17,8 +17,8 @@ public dataset suitable for exploratory analysis and machine-learning
 experiments.
 
 The repository intentionally does not include source-service branding in the
-documentation. To run the ingestion command, provide the appropriate listing and detail
-base URLs for the supported service in your local `.env` file.
+documentation. To run ingestion, provide source definitions in your private
+`config/sources.local.yaml` file.
 
 ## Portfolio Highlights
 
@@ -156,25 +156,26 @@ git lfs pull
 
 ## Configuration
 
-Create a local `.env` file in the repository root:
+Source definitions are loaded from YAML. The repository includes only a public,
+synthetic example:
 
 ```bash
-cp .env.example .env
+config/sources.example.yaml
 ```
 
-Then fill in the source-service URLs:
+For real local runs, create a private config file:
 
-```dotenv
-MAIN_URL="https://example.com/path/to/search/results/"
-ESTATE_URL="https://example.com/path/to/listing/details/"
+```bash
+cp config/sources.example.yaml config/sources.local.yaml
 ```
 
-`MAIN_URL` should point to the base search/listing-results URL of the supported
-Polish real estate advertising service. `ESTATE_URL` should point to the base
-listing-detail URL used to normalize relative listing links.
+Each source defines `source_id`, `adapter_type`, `enabled`, `base_url`,
+`search_url_template`, `rate_limit_seconds`, `max_pages_default`,
+`allowed_offer_types`, and `allowed_property_types`. The default loader uses
+`config/sources.local.yaml` when present, otherwise `config/sources.example.yaml`.
 
-The `.env` file is intentionally ignored by Git. Do not commit credentials,
-private URLs, or local configuration.
+`config/sources.local.yaml` is intentionally ignored by Git. Do not commit real
+source URLs, credentials, or local configuration.
 
 ## Quick Start
 
@@ -184,8 +185,7 @@ Install dependencies:
 uv sync --dev
 ```
 
-Run the offline demo pipeline without configuring `.env` or contacting the
-source service:
+Run the offline demo pipeline without contacting any configured source:
 
 ```bash
 uv run python -m src.etl.demo
@@ -232,6 +232,7 @@ Common options:
 | `--ignore-checkpoints` | Start selected targets from page 1 instead of saved resume checkpoints while still deduplicating existing bronze ids. |
 | `--duplicate-page-stop-threshold` | Optional stop for consecutive duplicate-only pages. Defaults to `0`, which disables this stop; repeated source pages are still detected. |
 | `--shard-strategy` | Split large searches into smaller source queries. Defaults to `market-price`; use `price` or `none` for narrower control. |
+| `--source-config` | Path to a YAML source config. Defaults to local config when present, otherwise the synthetic example. |
 | `--pretty` | Pretty-print the JSON command output. |
 
 Configured estate types:
@@ -260,8 +261,8 @@ The command uses a small built-in fixture dataset and writes:
 | Gold | `data/demo/gold/` |
 | Public | `data/demo/public/` |
 
-The demo intentionally bypasses ingestion and does not read `.env`, call the
-source service, or require network access. Its purpose is to make the pipeline
+The demo intentionally bypasses ingestion, does not call any configured source,
+and requires no network access. Its purpose is to make the pipeline
 reviewable in seconds while keeping real collection configuration private and
 optional.
 
@@ -362,11 +363,12 @@ The ingestion package is intentionally split into small modules:
 `estate_ingestion.py` keeps the stable public import path, `pipeline.py`
 orchestrates pagination and threaded streaming, `transport.py` fetches and
 parses source-service payloads, and `parsing.py` maps raw listing/detail data
-into typed `Estate` records.
+into typed `RawListingObservation` records.
 
-Shared configuration is split between `env.py` for runtime `.env` loading,
-`globals.py` for project constants and field lists, and `types.py` for
-cross-module type aliases used by ingestion, ETL helpers, and analytics CLIs.
+Shared configuration is split between `source_config.py` for YAML source
+definitions, `globals.py` for project constants and field lists, and `types.py`
+for cross-module type aliases used by ingestion, ETL helpers, and analytics
+CLIs.
 
 ## Development
 

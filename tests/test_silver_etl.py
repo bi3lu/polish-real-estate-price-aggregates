@@ -21,7 +21,7 @@ from src.models.estate import Estate
 def test_normalize_estate_returns_flat_silver_record() -> None:
     silver_estate = normalize_estate(
         Estate(
-            source="Estate Service",
+            source_id="Source A",
             external_id=" 123 ",
             url=" https://example.invalid/offer ",
             title="  Duże   mieszkanie  ",
@@ -78,8 +78,8 @@ def test_normalize_estate_returns_flat_silver_record() -> None:
     )
 
     assert silver_estate is not None
-    assert silver_estate.record_id == "estate_service:123"
-    assert silver_estate.source == "estate_service"
+    assert silver_estate.record_id == "source_a:123"
+    assert silver_estate.source_id == "source_a"
     assert silver_estate.title == "Duże mieszkanie"
     assert silver_estate.estate_type == "mieszkanie"
     assert silver_estate.voivodeship == "mazowieckie"
@@ -127,12 +127,12 @@ def test_transform_bronze_payload_skips_invalid_items_and_deduplicates() -> None
             "scraped_at": "2026-05-15T12:00:00+00:00",
             "data": [
                 {
-                    "source": "estate_service",
+                    "source_id": "source_a",
                     "external_id": "same-id",
                     "title": "Older title",
                 },
                 {
-                    "source": "estate_service",
+                    "source_id": "source_a",
                     "external_id": "same-id",
                     "title": "Newer title",
                     "price": 100,
@@ -144,7 +144,7 @@ def test_transform_bronze_payload_skips_invalid_items_and_deduplicates() -> None
     )
 
     assert len(records) == 1
-    assert records[0].record_id == "estate_service:same-id"
+    assert records[0].record_id == "source_a:same-id"
     assert records[0].title == "Newer title"
     assert records[0].price_pln == 100
     assert records[0].bronze_scraped_at == "2026-05-15T12:00:00+00:00"
@@ -177,7 +177,7 @@ def test_load_bronze_snapshot_supports_streaming_jsonl(tmp_path: Path) -> None:
                     {
                         "record_type": "estate",
                         "data": {
-                            "source": "estate_service",
+                            "source_id": "source_a",
                             "external_id": "listing-1",
                             "title": "Oferta",
                         },
@@ -208,7 +208,7 @@ def test_load_bronze_snapshot_supports_voivodeship_manifest(tmp_path: Path) -> N
                     {
                         "record_type": "estate",
                         "data": {
-                            "source": "estate_service",
+                            "source_id": "source_a",
                             "external_id": "listing-1",
                             "voivodeship": "mazowieckie",
                         },
@@ -254,7 +254,7 @@ def test_load_bronze_directory_snapshot_reads_all_voivodeship_files(
                 {
                     "record_type": "estate",
                     "data": {
-                        "source": "estate_service",
+                        "source_id": "source_a",
                         "external_id": external_id,
                         "voivodeship": voivodeship,
                     },
@@ -306,7 +306,7 @@ def test_run_bronze_to_silver_writes_normalized_csv(tmp_path: Path) -> None:
                 "count": 1,
                 "data": [
                     {
-                        "source": "estate_service",
+                        "source_id": "source_a",
                         "external_id": "listing-1",
                         "title": "Oferta",
                         "price": 500000,
@@ -329,7 +329,7 @@ def test_run_bronze_to_silver_writes_normalized_csv(tmp_path: Path) -> None:
         rows = list(csv.DictReader(output_file))
 
     assert len(rows) == 1
-    assert rows[0]["record_id"] == "estate_service:listing-1"
+    assert rows[0]["record_id"] == "source_a:listing-1"
     assert rows[0]["price_pln"] == "500000.0"
     assert rows[0]["has_price"] == "true"
     assert rows[0]["processed_at"] == "2026-05-15T13:00:00+00:00"

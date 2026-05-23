@@ -29,6 +29,7 @@ from src.config.globals import (
     REQUEST_RETRY_SLEEP_SECONDS,
     REQUEST_TIMEOUT_SECONDS,
 )
+from src.config.source_config import SourceDefinition
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -56,9 +57,11 @@ class SourceBlockedError(RuntimeError):
 class RequestThrottle:
     """Shared cooldown gate used by concurrent request workers."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, rate_limit_seconds: float = 0.0) -> None:
         self._lock = Lock()
         self._blocked_until = 0.0
+        self._next_allowed_at = 0.0
+        self._rate_limit_seconds = max(0.0, rate_limit_seconds)
 
     def wait_if_needed(self) -> None:
         """Sleep while a source-wide cooldown is active."""
@@ -67,12 +70,26 @@ class RequestThrottle:
                 sleep_seconds = self._blocked_until - time.monotonic()
 
             if sleep_seconds <= 0:
-                return
+                break
 
             logger.warning(
                 "Source cooldown active; sleeping %.1f seconds before next request",
                 sleep_seconds,
             )
+            time.sleep(sleep_seconds)
+
+        if self._rate_limit_seconds <= 0:
+            return
+
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                sleep_seconds = self._next_allowed_at - now
+
+                if sleep_seconds <= 0:
+                    self._next_allowed_at = now + self._rate_limit_seconds
+                    return
+
             time.sleep(sleep_seconds)
 
     def register_block(self, cooldown_seconds: float) -> None:
@@ -129,6 +146,7 @@ def build_listing_url(
     page: int = 1,
     main_url: str = MAIN_URL,
     query_params: Mapping[str, str] | None = None,
+    source: SourceDefinition | None = None,
 ) -> str:
     """Build a listing URL for a sale search page.
 
@@ -148,6 +166,16 @@ def build_listing_url(
     if page < 1:
         raise ValueError("page must be greater than or equal to 1")
 
+    if source is not None:
+        path_url = source.search_url_template.format(
+            page=page,
+            estate_type=estate_type,
+            property_type=estate_type,
+            voivodeship=voivodeship,
+            source_id=source.source_id,
+        )
+        return _append_query_params(path_url, query_params)
+
     base_url = main_url.rstrip("/") + "/"
     path_url = urllib.parse.urljoin(base_url, f"{estate_type}/{voivodeship}")
     query_values = {
@@ -158,6 +186,31 @@ def build_listing_url(
     query = urllib.parse.urlencode(query_values)
 
     return f"{path_url}?{query}"
+
+
+def _append_query_params(
+    url: str,
+    query_params: Mapping[str, str] | None,
+) -> str:
+    if not query_params:
+        return url
+
+    parsed_url = urllib.parse.urlsplit(url)
+    existing_query_values = urllib.parse.parse_qsl(
+        parsed_url.query,
+        keep_blank_values=True,
+    )
+    query = urllib.parse.urlencode([*existing_query_values, *query_params.items()])
+
+    return urllib.parse.urlunsplit(
+        (
+            parsed_url.scheme,
+            parsed_url.netloc,
+            parsed_url.path,
+            query,
+            parsed_url.fragment,
+        )
+    )
 
 
 def extract_next_data_from_html(html_content: str) -> dict[str, Any]:

@@ -152,8 +152,8 @@ def test_stream_estates_to_bronze_skips_existing_external_ids(
         "listing-2",
     ]
     assert load_bronze_external_ids_by_voivodeship(tmp_path)["mazowieckie"] == {
-        "listing-1",
-        "listing-2",
+        "source_a:listing-1",
+        "source_a:listing-2",
     }
 
 

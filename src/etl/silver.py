@@ -16,8 +16,7 @@ from src.config.globals import (
     LIST_SEPARATOR,
     SILVER_DATA_DIR,
 )
-from src.models.estate import Estate
-from src.models.silver_estate import SilverEstate
+from src.ingestion.models import CanonicalListing, RawListingObservation
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -316,7 +315,7 @@ def transform_bronze_payload(
     bronze_payload: dict[str, Any],
     *,
     processed_at: datetime | None = None,
-) -> list[SilverEstate]:
+) -> list[CanonicalListing]:
     """Transform a bronze payload into normalized silver records.
 
     Args:
@@ -324,7 +323,7 @@ def transform_bronze_payload(
         processed_at: Optional timestamp assigned to produced silver records.
 
     Returns:
-        Deduplicated silver records keyed by source and external listing id.
+        Deduplicated silver records keyed by source_id and external listing id.
 
     Raises:
         ValueError: If the bronze payload ``data`` field is not a list.
@@ -336,7 +335,7 @@ def transform_bronze_payload(
 
     snapshot_time = processed_at or datetime.now(timezone.utc)
     bronze_scraped_at = _normalize_text(bronze_payload.get("scraped_at"))
-    records_by_id: dict[str, SilverEstate] = {}
+    records_by_id: dict[str, CanonicalListing] = {}
 
     for raw_item in raw_items:
         if not isinstance(raw_item, dict):
@@ -344,7 +343,7 @@ def transform_bronze_payload(
             continue
 
         try:
-            bronze_estate = Estate.model_validate(raw_item)
+            bronze_estate = RawListingObservation.model_validate(raw_item)
 
         except ValidationError as exc:
             logger.warning("Skipping invalid bronze estate item: %s", exc)
@@ -366,11 +365,11 @@ def transform_bronze_payload(
 
 
 def normalize_estate(
-    estate: Estate,
+    estate: RawListingObservation,
     *,
     bronze_scraped_at: str | None = None,
     processed_at: datetime | None = None,
-) -> SilverEstate | None:
+) -> CanonicalListing | None:
     """Normalize one raw estate listing into the silver schema.
 
     Args:
@@ -384,7 +383,7 @@ def normalize_estate(
         external id.
     """
     snapshot_time = processed_at or datetime.now(timezone.utc)
-    source = _normalize_slug(estate.source) or "estate_service"
+    source_id = _normalize_slug(estate.source_id) or "source_a"
     external_id = _normalize_text(estate.external_id)
 
     if external_id is None:
@@ -416,9 +415,9 @@ def normalize_estate(
         city=estate.city,
     )
 
-    return SilverEstate(
-        record_id=f"{source}:{external_id}",
-        source=source,
+    return CanonicalListing(
+        record_id=f"{source_id}:{external_id}",
+        source_id=source_id,
         external_id=external_id,
         url=_normalize_text(estate.url),
         title=_normalize_text(estate.title),
@@ -515,7 +514,7 @@ def normalize_estate(
 
 
 def save_silver_snapshot(
-    records: list[SilverEstate],
+    records: list[CanonicalListing],
     *,
     output_dir: Path = SILVER_DATA_DIR,
     processed_at: datetime | None = None,
@@ -538,7 +537,7 @@ def save_silver_snapshot(
     with output_path.open("w", encoding="utf-8", newline="") as output_file:
         writer = csv.DictWriter(
             output_file,
-            fieldnames=list(SilverEstate.model_fields),
+            fieldnames=list(CanonicalListing.model_fields),
             extrasaction="raise",
         )
         writer.writeheader()
@@ -554,7 +553,7 @@ def _build_silver_filename(processed_at: datetime) -> str:
     return f"estate_silver_{timestamp}.csv"
 
 
-def _serialize_csv_row(record: SilverEstate) -> dict[str, Any]:
+def _serialize_csv_row(record: CanonicalListing) -> dict[str, Any]:
     row = record.model_dump(mode="json")
 
     return {key: _serialize_csv_value(value) for key, value in row.items()}

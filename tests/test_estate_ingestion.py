@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+from src.config.source_config import SourceDefinition
 from src.config.env import normalize_url
 from src.config.globals import ESTATE_URL, MAIN_URL
 from src.ingestion.estate_ingestion import (
@@ -48,6 +49,67 @@ def test_build_listing_url_accepts_search_query_params() -> None:
     assert query["page"] == ["2"]
     assert query["search[filter_float_price:from]"] == ["300000"]
     assert query["search[filter_float_price:to]"] == ["400000"]
+
+
+def test_iter_estates_uses_enabled_configured_sources() -> None:
+    requested_urls: list[str] = []
+
+    def fetcher(url: str) -> Mapping[str, Any]:
+        requested_urls.append(url)
+        return {
+            "searchAds": {
+                "items": [
+                    {
+                        "id": "listing-1",
+                        "title": "Configured source offer",
+                    }
+                ]
+            }
+        }
+
+    source_a = SourceDefinition(
+        source_id="source_a",
+        adapter_type="embedded_json_listing_site",
+        enabled=True,
+        base_url="https://example-listing-site.local",
+        search_url_template=(
+            "https://example-listing-site.local/search"
+            "?property={property_type}&region={voivodeship}&page={page}"
+        ),
+        rate_limit_seconds=0,
+        max_pages_default=3,
+        allowed_offer_types=("sale",),
+        allowed_property_types=("apartment",),
+    )
+    source_b = SourceDefinition(
+        source_id="source_b",
+        adapter_type="html_listing_site",
+        enabled=False,
+        base_url="https://example-listing-site-2.local",
+        search_url_template="https://example-listing-site-2.local/offers?page={page}",
+        rate_limit_seconds=0,
+        max_pages_default=3,
+        allowed_offer_types=("sale",),
+        allowed_property_types=("apartment",),
+    )
+
+    estates = list(
+        iter_estates(
+            estate_types=("mieszkanie",),
+            voivodeships=("mazowieckie",),
+            max_page=1,
+            fetcher=fetcher,
+            detail_fetcher=None,
+            sources=(source_a, source_b),
+        )
+    )
+
+    assert requested_urls == [
+        "https://example-listing-site.local/search"
+        "?property=mieszkanie&region=mazowieckie&page=1"
+    ]
+    assert len(estates) == 1
+    assert estates[0].source_id == "source_a"
 
 
 def test_extract_next_data_from_html_parses_next_script() -> None:

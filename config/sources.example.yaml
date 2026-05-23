@@ -1,0 +1,24 @@
+sources:
+  - source_id: source_a
+    adapter_type: embedded_json_listing_site
+    enabled: true
+    base_url: "https://example-listing-site.local"
+    search_url_template: "https://example-listing-site.local/search?page={page}"
+    rate_limit_seconds: 5
+    max_pages_default: 3
+    allowed_offer_types:
+      - sale
+    allowed_property_types:
+      - apartment
+
+  - source_id: source_b
+    adapter_type: html_listing_site
+    enabled: false
+    base_url: "https://example-listing-site-2.local"
+    search_url_template: "https://example-listing-site-2.local/offers?page={page}"
+    rate_limit_seconds: 8
+    max_pages_default: 3
+    allowed_offer_types:
+      - sale
+    allowed_property_types:
+      - apartment

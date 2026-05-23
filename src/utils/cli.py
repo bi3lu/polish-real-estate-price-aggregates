@@ -11,7 +11,6 @@ from pathlib import Path
 from threading import Lock
 from typing import TextIO
 
-from src.config.env import get_required_env_file_value
 from src.config.globals import (
     DEFAULT_SEARCH_SHARD_STRATEGY,
     DEFAULT_WORKERS,
@@ -20,8 +19,9 @@ from src.config.globals import (
     RESUME_DUPLICATE_PAGE_STOP_THRESHOLD,
     VOIVODESHIPS,
 )
+from src.config.source_config import load_source_config
 from src.ingestion.estate_ingestion import iter_estates
-from src.models.estate import Estate
+from src.ingestion.models import RawListingObservation
 from src.utils.logger import get_logger
 from src.utils.storage import (
     load_bronze_external_ids_by_voivodeship,
@@ -44,9 +44,10 @@ class CliOptions:
     ignore_checkpoints: bool
     duplicate_page_stop_threshold: int
     search_shard_strategy: str
+    source_config_path: Path | None = None
 
 
-IngestFn = Callable[..., Iterable[Estate]]
+IngestFn = Callable[..., Iterable[RawListingObservation]]
 SaveFn = Callable[..., tuple[Path, int]]
 ValidateFn = Callable[[], None]
 ExistingIdsLoaderFn = Callable[[], dict[str, set[str]]]
@@ -134,6 +135,15 @@ def build_parser() -> argparse.ArgumentParser:
             f"Defaults to {DEFAULT_SEARCH_SHARD_STRATEGY}."
         ),
     )
+    parser.add_argument(
+        "--source-config",
+        type=Path,
+        default=None,
+        help=(
+            "Path to a source YAML config. Defaults to config/sources.local.yaml "
+            "when present, otherwise config/sources.example.yaml."
+        ),
+    )
 
     return parser
 
@@ -169,6 +179,7 @@ def parse_cli_args(args: Sequence[str] | None = None) -> CliOptions:
             ignore_checkpoints=namespace.ignore_checkpoints,
             duplicate_page_stop_threshold=namespace.duplicate_page_stop_threshold,
             search_shard_strategy=namespace.shard_strategy,
+            source_config_path=namespace.source_config,
         )
 
     except argparse.ArgumentTypeError as exc:
@@ -176,9 +187,8 @@ def parse_cli_args(args: Sequence[str] | None = None) -> CliOptions:
 
 
 def _validate_required_runtime_env() -> None:
-    """Validate that runtime-only URL configuration is present."""
-    get_required_env_file_value("MAIN_URL")
-    get_required_env_file_value("ESTATE_URL")
+    """Compatibility no-op for callers that still inject a validator."""
+    return None
 
 
 def run_cli(
@@ -207,6 +217,8 @@ def run_cli(
     """
     validator()
     options = parse_cli_args(args)
+    source_config = load_source_config(options.source_config_path)
+    enabled_sources = source_config.enabled_sources()
     logger.info(
         "CLI run started: estate_types=%s voivodeships=%s max_page=%s workers=%s",
         ", ".join(options.estate_types),
@@ -253,6 +265,7 @@ def run_cli(
         duplicate_page_stop_threshold=options.duplicate_page_stop_threshold,
         search_shard_strategy=options.search_shard_strategy,
         progress_callback=progress_callback,
+        sources=enabled_sources,
     )
     output_path, count = saver(
         estates,
@@ -272,6 +285,7 @@ def run_cli(
             "ignore_checkpoints": options.ignore_checkpoints,
             "duplicate_page_stop_threshold": options.duplicate_page_stop_threshold,
             "search_shard_strategy": options.search_shard_strategy,
+            "source_ids": [source.source_id for source in enabled_sources],
         },
         stdout,
         ensure_ascii=False,

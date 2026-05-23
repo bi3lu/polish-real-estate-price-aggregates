@@ -20,7 +20,7 @@ from src.models.gold_estate import (
     GoldListingFeature,
     GoldSegmentAggregate,
 )
-from src.models.silver_estate import SilverEstate
+from src.ingestion.models import CanonicalListing
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -110,7 +110,7 @@ def find_latest_silver_snapshot(silver_dir: Path = SILVER_DATA_DIR) -> Path:
     return snapshots[-1]
 
 
-def load_silver_snapshot(silver_path: Path) -> list[SilverEstate]:
+def load_silver_snapshot(silver_path: Path) -> list[CanonicalListing]:
     """Load and validate silver records from a CSV snapshot.
 
     Args:
@@ -119,14 +119,14 @@ def load_silver_snapshot(silver_path: Path) -> list[SilverEstate]:
     Returns:
         Valid silver records. Invalid rows are skipped and logged.
     """
-    records: list[SilverEstate] = []
+    records: list[CanonicalListing] = []
 
     with silver_path.open(encoding="utf-8", newline="") as input_file:
         reader = csv.DictReader(input_file)
 
         for line_number, row in enumerate(reader, start=2):
             try:
-                records.append(SilverEstate.model_validate(_parse_silver_row(row)))
+                records.append(CanonicalListing.model_validate(_parse_silver_row(row)))
 
             except ValidationError as exc:
                 logger.warning(
@@ -140,7 +140,7 @@ def load_silver_snapshot(silver_path: Path) -> list[SilverEstate]:
 
 
 def transform_silver_records(
-    records: Iterable[SilverEstate],
+    records: Iterable[CanonicalListing],
     *,
     processed_at: datetime | None = None,
 ) -> GoldTables:
@@ -179,7 +179,7 @@ def transform_silver_records(
 
 
 def build_listing_feature(
-    record: SilverEstate,
+    record: CanonicalListing,
     *,
     processed_at: str,
 ) -> GoldListingFeature:
@@ -581,7 +581,7 @@ def _anonymize_record_id(record_id: str) -> str:
     return f"gold_{digest}"
 
 
-def _resolve_price_per_sqm(record: SilverEstate) -> tuple[float | None, str | None]:
+def _resolve_price_per_sqm(record: CanonicalListing) -> tuple[float | None, str | None]:
     if record.price_per_sqm_pln is not None:
         return record.price_per_sqm_pln, "source"
 
@@ -657,7 +657,7 @@ def _safe_ratio(numerator: int | None, denominator: int | None) -> float | None:
     return round(numerator / denominator, 4)
 
 
-def _geo_precision(record: SilverEstate) -> str:
+def _geo_precision(record: CanonicalListing) -> str:
     if record.has_coordinates:
         return "coordinates"
 

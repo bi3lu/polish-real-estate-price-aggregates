@@ -1,4 +1,4 @@
-"""Payload parsing and Estate model extraction for real estate ingestion."""
+"""Payload parsing and raw listing model extraction for ingestion."""
 
 from __future__ import annotations
 
@@ -7,13 +7,13 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any, cast
 
 from src.config.globals import (
+    DEFAULT_SOURCE_ID,
     ESTATE_URL,
     FLOOR_MAP,
     NUMBER_RE,
     ROOMS_NUM_MAP,
-    SERVICE_SOURCE,
 )
-from src.models.estate import Estate
+from src.ingestion.models import RawListingObservation
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -128,7 +128,10 @@ def get_estate_info(
     estate_data: Mapping[str, Any],
     estate_type: str | None = None,
     voivodeship: str | None = None,
-) -> Estate | None:
+    *,
+    source_id: str = DEFAULT_SOURCE_ID,
+    detail_base_url: str = ESTATE_URL,
+) -> RawListingObservation | None:
     """Extract normalized estate details from a listing payload.
 
     Args:
@@ -137,7 +140,7 @@ def get_estate_info(
         voivodeship: Optional voivodeship assigned from the ingestion target.
 
     Returns:
-        Estate model, or ``None`` when no stable external id can be derived.
+        Raw listing model, or ``None`` when no stable external id can be derived.
     """
     if not isinstance(estate_data, Mapping):
         return None
@@ -155,6 +158,7 @@ def get_estate_info(
         _as_text(_first_direct_value(estate_data, ("url", "href", "link"))),
         slug=slug,
         external_id=external_id,
+        detail_base_url=detail_base_url,
     )
 
     if external_id is None:
@@ -182,8 +186,8 @@ def get_estate_info(
         estate_data, city=city, district=district, street=street
     )
 
-    return Estate(
-        source=SERVICE_SOURCE,
+    return RawListingObservation(
+        source_id=source_id,
         external_id=external_id,
         url=url,
         title=title,
@@ -241,6 +245,7 @@ def enrich_listing_item(
     listing_item: Mapping[str, Any],
     *,
     detail_fetcher: Callable[[str], Mapping[str, Any]] | None,
+    detail_base_url: str = ESTATE_URL,
 ) -> Mapping[str, Any]:
     if detail_fetcher is None:
         return listing_item
@@ -254,6 +259,7 @@ def enrich_listing_item(
                 ("id", "adId", "estateId", "externalId", "offerId"),
             )
         ),
+        detail_base_url=detail_base_url,
     )
 
     if listing_url is None:
@@ -682,6 +688,7 @@ def _build_estate_url(
     *,
     slug: str | None,
     external_id: str | None,
+    detail_base_url: str = ESTATE_URL,
 ) -> str | None:
     raw_url = url or slug or external_id
 
@@ -689,28 +696,34 @@ def _build_estate_url(
         return None
 
     if raw_url.startswith(("http://", "https://")):
-        return _normalize_estate_url(raw_url)
+        return _normalize_estate_url(raw_url, detail_base_url=detail_base_url)
 
     if raw_url.startswith("/"):
         return _normalize_estate_url(
-            urllib.parse.urljoin(_url_origin(ESTATE_URL), raw_url)
+            urllib.parse.urljoin(_url_origin(detail_base_url), raw_url),
+            detail_base_url=detail_base_url,
         )
 
     if raw_url.startswith("pl/"):
         return _normalize_estate_url(
-            urllib.parse.urljoin(_url_origin(ESTATE_URL).rstrip("/") + "/", raw_url)
+            urllib.parse.urljoin(
+                _url_origin(detail_base_url).rstrip("/") + "/",
+                raw_url,
+            ),
+            detail_base_url=detail_base_url,
         )
 
     return _normalize_estate_url(
-        urllib.parse.urljoin(ESTATE_URL.rstrip("/") + "/", raw_url)
+        urllib.parse.urljoin(detail_base_url.rstrip("/") + "/", raw_url),
+        detail_base_url=detail_base_url,
     )
 
 
-def _normalize_estate_url(url: str) -> str:
+def _normalize_estate_url(url: str, *, detail_base_url: str = ESTATE_URL) -> str:
     normalized_url = url.replace("[lang]/ad/", "")
     normalized_url = normalized_url.replace("/ad/", "/")
     parsed_url = urllib.parse.urlsplit(normalized_url)
-    base_path = urllib.parse.urlsplit(ESTATE_URL).path.strip("/")
+    base_path = urllib.parse.urlsplit(detail_base_url).path.strip("/")
     path_parts = [part for part in parsed_url.path.strip("/").split("/") if part]
     base_parts = [part for part in base_path.split("/") if part]
 

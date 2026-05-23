@@ -19,8 +19,8 @@ from src.models.silver_estate import SilverEstate
 def test_build_listing_feature_derives_ml_ready_fields() -> None:
     feature = build_listing_feature(
         SilverEstate(
-            record_id="estate_service:1",
-            source="estate_service",
+            record_id="source_a:1",
+            source_id="source_a",
             external_id="1",
             estate_type="mieszkanie",
             voivodeship="mazowieckie",
@@ -47,7 +47,7 @@ def test_build_listing_feature_derives_ml_ready_fields() -> None:
 
     assert feature.price_per_sqm_pln == 12000
     assert feature.record_id.startswith("gold_")
-    assert feature.record_id != "estate_service:1"
+    assert feature.record_id != "source_a:1"
     assert feature.price_per_sqm_source == "derived"
     assert feature.area_bucket == "50_70"
     assert feature.price_bucket == "500k_750k"
@@ -62,8 +62,8 @@ def test_build_listing_feature_derives_ml_ready_fields() -> None:
 def test_transform_silver_records_builds_gold_tables() -> None:
     records = [
         SilverEstate(
-            record_id="estate_service:1",
-            source="estate_service",
+            record_id="source_a:1",
+            source_id="source_a",
             external_id="1",
             estate_type="mieszkanie",
             voivodeship="mazowieckie",
@@ -85,8 +85,8 @@ def test_transform_silver_records_builds_gold_tables() -> None:
             processed_at="2026-05-17T12:00:00+00:00",
         ),
         SilverEstate(
-            record_id="estate_service:2",
-            source="estate_service",
+            record_id="source_a:2",
+            source_id="source_a",
             external_id="2",
             estate_type="mieszkanie",
             voivodeship="mazowieckie",
@@ -144,8 +144,8 @@ def test_load_silver_snapshot_parses_csv_types(tmp_path: Path) -> None:
         writer.writeheader()
         writer.writerow(
             {
-                "record_id": "estate_service:1",
-                "source": "estate_service",
+                "record_id": "source_a:1",
+                "source_id": "source_a",
                 "external_id": "1",
                 "price_pln": "500000.0",
                 "area_sqm": "50.0",
@@ -181,8 +181,8 @@ def test_run_silver_to_gold_writes_all_gold_tables(tmp_path: Path) -> None:
         writer.writeheader()
         writer.writerow(
             {
-                "record_id": "estate_service:1",
-                "source": "estate_service",
+                "record_id": "source_a:1",
+                "source_id": "source_a",
                 "external_id": "1",
                 "estate_type": "mieszkanie",
                 "voivodeship": "mazowieckie",
@@ -216,7 +216,7 @@ def test_run_silver_to_gold_writes_all_gold_tables(tmp_path: Path) -> None:
         rows = list(csv.DictReader(input_file))
 
     assert rows[0]["record_id"].startswith("gold_")
-    assert rows[0]["record_id"] != "estate_service:1"
+    assert rows[0]["record_id"] != "source_a:1"
     assert "source" not in rows[0]
     assert "external_id" not in rows[0]
     assert "url" not in rows[0]

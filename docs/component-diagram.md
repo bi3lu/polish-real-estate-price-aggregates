@@ -15,6 +15,7 @@ flowchart LR
     silver[src.etl.silver]
     gold[src.etl.gold]
     public[src.etl.public]
+    analytics[src.analytics.market_ranking]
     tests[tests]
 
     app --> cli
@@ -57,6 +58,9 @@ flowchart LR
     public --> config
     public --> logger
 
+    analytics --> config
+    analytics --> logger
+
     tests -. verify .-> cli
     tests -. verify .-> ingestion_facade
     tests -. verify .-> ingestion_pipeline
@@ -66,6 +70,7 @@ flowchart LR
     tests -. verify .-> silver
     tests -. verify .-> gold
     tests -. verify .-> public
+    tests -. verify .-> analytics
 ```
 
 The ingestion package is split into focused modules: `transport` handles HTTP

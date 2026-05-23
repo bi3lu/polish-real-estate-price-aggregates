@@ -17,5 +17,7 @@ runtime flows of the Polish Real Estate Price Aggregates project.
   datasets.
 - [Data Model Overview](data-model-overview.md) - core Pydantic models and
   generated table groups.
+- [Market Ranking CLI](market-ranking.md) - public-dataset ranking commands for
+  regional and segment-level market analysis.
 
 GitHub renders Mermaid blocks directly in Markdown files.

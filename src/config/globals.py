@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TypeVar
+from typing import Literal, TypeVar
 
 from src.config.env import PROJECT_ROOT, get_env_file_value
 
@@ -178,3 +178,38 @@ BRONZE_STREAM_CHECKPOINT_INTERVAL = 25
 
 DEMO_PROCESSED_AT = datetime(2026, 5, 21, 12, 0, tzinfo=timezone.utc)
 DEMO_MIN_GROUP_SIZE = 2
+
+#######################################################################################
+# Market ranking settings:
+#######################################################################################
+
+OUTPUT_FORMAT = Literal["table", "json", "csv"]
+
+GROUP_BY = Literal[
+    "voivodeship",
+    "city",
+    "estate_type",
+    "voivodeship_city",
+    "voivodeship_estate_type",
+]
+
+SORT_BY = Literal[
+    "records_count",
+    "median_price_per_sqm_pln",
+    "avg_price_per_sqm_pln",
+    "median_price_pln",
+    "share_with_price_per_sqm",
+]
+
+RANKING_FIELDNAMES = (
+    "rank",
+    "group",
+    "records_count",
+    "median_price_per_sqm_pln",
+    "avg_price_per_sqm_pln",
+    "q25_price_per_sqm_pln",
+    "q75_price_per_sqm_pln",
+    "median_price_pln",
+    "share_with_price_per_sqm",
+    "share_with_total_price",
+)

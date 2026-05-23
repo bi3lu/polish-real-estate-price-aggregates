@@ -13,12 +13,10 @@ from pathlib import Path
 from typing import TextIO
 
 from src.config.globals import (
-    GROUP_BY,
-    OUTPUT_FORMAT,
     PUBLIC_DATA_DIR,
     RANKING_FIELDNAMES,
-    SORT_BY,
 )
+from src.config.types import GroupBy, OutputFormat, SortBy
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -29,14 +27,14 @@ class MarketRankingOptions:
     """Parsed options for the market ranking CLI."""
 
     input_path: Path | None
-    group_by: GROUP_BY
+    group_by: GroupBy
     voivodeships: tuple[str, ...]
     estate_types: tuple[str, ...]
     min_records: int
     limit: int
-    sort_by: SORT_BY
+    sort_by: SortBy
     ascending: bool
-    output_format: OUTPUT_FORMAT
+    output_format: OutputFormat
     include_suppressed_location: bool
 
 
@@ -276,7 +274,7 @@ def build_market_ranking(
 def render_ranking(
     rows: Sequence[MarketRankingRow],
     *,
-    output_format: OUTPUT_FORMAT,
+    output_format: OutputFormat,
     stdout: TextIO,
 ) -> None:
     """Render ranking rows to stdout."""
@@ -332,7 +330,7 @@ def _build_ranking_row(
 def _group_key(
     record: PublicMarketRecord,
     *,
-    group_by: GROUP_BY,
+    group_by: GroupBy,
     include_suppressed_location: bool,
 ) -> str | None:
     city = record.city or "suppressed"
@@ -361,7 +359,7 @@ def _group_key(
 def _sort_ranking_rows(
     rows: Sequence[MarketRankingRow],
     *,
-    sort_by: SORT_BY,
+    sort_by: SortBy,
     ascending: bool,
 ) -> list[MarketRankingRow]:
     populated_rows: list[MarketRankingRow] = []

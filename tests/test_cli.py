@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from src.config.globals import ESTATE_TYPES, VOIVODESHIPS
+from src.config.globals import DEFAULT_SEARCH_SHARD_STRATEGY, ESTATE_TYPES, VOIVODESHIPS
 from src.models.estate import Estate
 from src.utils.cli import parse_cli_args, run_cli
 
@@ -20,6 +20,9 @@ def test_parse_cli_args_defaults_to_all_configured_values() -> None:
     assert set(options.estate_types) == ESTATE_TYPES
     assert set(options.voivodeships) == VOIVODESHIPS
     assert options.workers == 4
+    assert options.ignore_checkpoints is False
+    assert options.duplicate_page_stop_threshold == 0
+    assert options.search_shard_strategy == DEFAULT_SEARCH_SHARD_STRATEGY
 
 
 def test_parse_cli_args_accepts_repeated_and_comma_separated_filters() -> None:
@@ -44,6 +47,22 @@ def test_parse_cli_args_accepts_repeated_and_comma_separated_filters() -> None:
     assert options.voivodeships == ("mazowieckie", "pomorskie", "slaskie")
     assert options.max_page == 3
     assert options.workers == 2
+
+
+def test_parse_cli_args_accepts_ignore_checkpoints() -> None:
+    options = parse_cli_args(
+        [
+            "--ignore-checkpoints",
+            "--duplicate-page-stop-threshold",
+            "2",
+            "--shard-strategy",
+            "price",
+        ]
+    )
+
+    assert options.ignore_checkpoints is True
+    assert options.duplicate_page_stop_threshold == 2
+    assert options.search_shard_strategy == "price"
 
 
 def test_parse_cli_args_rejects_unknown_values() -> None:
@@ -98,6 +117,8 @@ def test_run_cli_calls_ingester_with_selected_filters_and_prints_json() -> None:
         "workers": 4,
         "existing_external_ids_by_voivodeship": {},
         "start_pages_by_target": {},
+        "duplicate_page_stop_threshold": 0,
+        "search_shard_strategy": "market-price",
         "progress_callback": captured_kwargs["progress_callback"],
     }
     assert captured_save_kwargs["estate_types"] == ("mieszkanie",)
@@ -113,4 +134,40 @@ def test_run_cli_calls_ingester_with_selected_filters_and_prints_json() -> None:
         "estate_types": ["mieszkanie"],
         "voivodeships": ["mazowieckie"],
         "workers": 4,
+        "ignore_checkpoints": False,
+        "duplicate_page_stop_threshold": 0,
+        "search_shard_strategy": "market-price",
     }
+
+
+def test_run_cli_can_ignore_saved_page_checkpoints() -> None:
+    captured_kwargs: dict[str, Any] = {}
+
+    def ingester(**kwargs: Any) -> list[Estate]:
+        captured_kwargs.update(kwargs)
+        return []
+
+    exit_code = run_cli(
+        [
+            "--estate-type",
+            "mieszkanie",
+            "--voivodeship",
+            "mazowieckie",
+            "--ignore-checkpoints",
+        ],
+        ingester=ingester,
+        saver=lambda estates, **kwargs: (Path("manifest.json"), 0),
+        validator=lambda: None,
+        existing_ids_loader=lambda: {},
+        page_checkpoints_loader=lambda: {
+            "mazowieckie": {
+                "mieszkanie": 74,
+            }
+        },
+        stdout=StringIO(),
+    )
+
+    assert exit_code == 0
+    assert captured_kwargs["start_pages_by_target"] == {}
+    assert captured_kwargs["duplicate_page_stop_threshold"] == 0
+    assert captured_kwargs["search_shard_strategy"] == "market-price"

@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal, TypeVar
 
 from src.config.env import PROJECT_ROOT, get_env_file_value
 
@@ -107,7 +106,8 @@ ESTATE_URL: str = get_env_file_value("ESTATE_URL", "https://example.invalid/esta
 #######################################################################################
 
 MAX_PAGE: int = 1001
-RESUME_DUPLICATE_PAGE_STOP_THRESHOLD = 1001
+RESUME_DUPLICATE_PAGE_STOP_THRESHOLD = 0
+DEFAULT_SEARCH_SHARD_STRATEGY = "market-price"
 
 #######################################################################################
 # HTTP retry and timeout settings:
@@ -116,6 +116,12 @@ RESUME_DUPLICATE_PAGE_STOP_THRESHOLD = 1001
 REQUEST_TIMEOUT_SECONDS: int = 30
 REQUEST_RETRIES: int = 3
 REQUEST_RETRY_SLEEP_SECONDS: float = 1.0
+REQUEST_BLOCK_STATUS_CODES: frozenset[int] = frozenset({403, 429})
+REQUEST_BLOCK_RETRIES: int = 96
+REQUEST_BLOCK_COOLDOWN_SECONDS: float = 300.0
+REQUEST_BLOCK_COOLDOWN_MAX_SECONDS: float = 1800.0
+REQUEST_BLOCK_BACKOFF_MULTIPLIER: float = 1.5
+REQUEST_BLOCK_JITTER_SECONDS: float = 30.0
 
 #######################################################################################
 # HTTP request headers:
@@ -154,12 +160,6 @@ NUMBER_RE = re.compile(r"\d+(?:[\s\u00a0]\d{3})*(?:[,.]\d+)?|\d+(?:[,.]\d+)?")
 LIST_SEPARATOR = "|"
 
 #######################################################################################
-# Typing helpers:
-#######################################################################################
-
-T = TypeVar("T")
-
-#######################################################################################
 # ETL defaults:
 #######################################################################################
 
@@ -182,24 +182,6 @@ DEMO_MIN_GROUP_SIZE = 2
 #######################################################################################
 # Market ranking settings:
 #######################################################################################
-
-OUTPUT_FORMAT = Literal["table", "json", "csv"]
-
-GROUP_BY = Literal[
-    "voivodeship",
-    "city",
-    "estate_type",
-    "voivodeship_city",
-    "voivodeship_estate_type",
-]
-
-SORT_BY = Literal[
-    "records_count",
-    "median_price_per_sqm_pln",
-    "avg_price_per_sqm_pln",
-    "median_price_pln",
-    "share_with_price_per_sqm",
-]
 
 RANKING_FIELDNAMES = (
     "rank",

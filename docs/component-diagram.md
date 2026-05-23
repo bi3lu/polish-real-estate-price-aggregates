@@ -4,7 +4,7 @@
 flowchart LR
     app[src.app]
     cli[src.utils.cli]
-    config[src.config<br/>env.py + globals.py]
+    config[src.config<br/>env.py + globals.py + types.py]
     ingestion_facade[src.ingestion<br/>estate_ingestion.py facade]
     ingestion_pipeline[src.ingestion.pipeline<br/>pagination + workers]
     ingestion_transport[src.ingestion.transport<br/>HTTP + Next.js payloads]
@@ -73,11 +73,15 @@ flowchart LR
     tests -. verify .-> analytics
 ```
 
-The ingestion package is split into focused modules: `transport` handles HTTP
-and embedded Next.js payload extraction, `parsing` converts raw listing/detail
-payloads into `Estate` models, and `pipeline` owns pagination, resume behavior,
-and threaded streaming. `estate_ingestion.py` remains as a compatibility facade
-for existing imports.
+The ingestion package is split into focused modules: `transport` handles HTTP,
+shared source cooldowns, and embedded Next.js payload extraction, `parsing`
+converts raw listing/detail payloads into `Estate` models, and `pipeline` owns
+pagination, resume behavior, and threaded streaming. `estate_ingestion.py`
+remains as a compatibility facade for existing imports.
+
+Shared project configuration lives under `src.config`: `env.py` reads runtime
+settings, `globals.py` keeps constants and field lists, and `types.py` collects
+cross-module type aliases used by ingestion, ETL helpers, and analytics CLIs.
 
 The project keeps source-specific ingestion, storage, ETL transformations, and
 data models separated so each layer can be tested independently.

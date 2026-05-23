@@ -3,6 +3,7 @@
 ```mermaid
 flowchart TD
     env[.env configuration<br/>MAIN_URL and ESTATE_URL]
+    config_types[src.config.types<br/>shared type aliases]
     cli[main.py / src.utils.cli]
     ingestion[src.ingestion.estate_ingestion<br/>compatibility facade]
     ingestion_pipeline[src.ingestion.pipeline<br/>pagination + resume]
@@ -20,6 +21,9 @@ flowchart TD
     public_readme[data/public/README.md]
 
     env --> cli
+    config_types --> cli
+    config_types --> ingestion_pipeline
+    config_types --> market_ranking
     cli --> ingestion
     ingestion --> ingestion_pipeline
     ingestion_pipeline --> ingestion_transport
@@ -49,3 +53,7 @@ Ingestion is implemented as a small facade plus focused internal modules. The
 facade preserves the historical import path, while `pipeline`, `transport`, and
 `parsing` keep pagination, network fetching, and source-payload normalization
 separate.
+
+Shared type aliases are centralized in `src.config.types`, including ingestion
+progress callbacks, search shard strategy names, market-ranking group/sort
+options, and generic helper type variables used by ETL modules.

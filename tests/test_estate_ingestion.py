@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 from src.config.env import normalize_url
 from src.config.globals import ESTATE_URL, MAIN_URL
 from src.ingestion.estate_ingestion import (
     build_listing_url,
+    build_search_shards,
     extract_listing_items,
     extract_next_data_from_html,
     get_estate_info,
@@ -27,6 +29,25 @@ def test_build_listing_url_uses_estate_type_voivodeship_and_page() -> None:
     assert build_listing_url("mieszkanie", "mazowieckie", page=2) == (
         f"{MAIN_URL.rstrip('/')}/mieszkanie/mazowieckie?viewType=listing&page=2"
     )
+
+
+def test_build_listing_url_accepts_search_query_params() -> None:
+    url = build_listing_url(
+        "mieszkanie",
+        "mazowieckie",
+        page=2,
+        query_params={
+            "search[filter_float_price:from]": "300000",
+            "search[filter_float_price:to]": "400000",
+        },
+    )
+
+    query = parse_qs(urlsplit(url).query)
+
+    assert query["viewType"] == ["listing"]
+    assert query["page"] == ["2"]
+    assert query["search[filter_float_price:from]"] == ["300000"]
+    assert query["search[filter_float_price:to]"] == ["400000"]
 
 
 def test_extract_next_data_from_html_parses_next_script() -> None:
@@ -60,6 +81,42 @@ def test_extract_listing_items_supports_next_data_json_variant() -> None:
     assert extract_listing_items(next_data_json) == [
         {"id": "first"},
         {"id": "second"},
+    ]
+
+
+def test_extract_listing_items_supports_nested_query_cache_shape() -> None:
+    next_data_json = {
+        "props": {
+            "pageProps": {
+                "dehydratedState": {
+                    "queries": [
+                        {
+                            "state": {
+                                "data": {
+                                    "searchAds": {
+                                        "items": [
+                                            {
+                                                "id": "first",
+                                                "title": "Oferta z cache",
+                                            },
+                                            {
+                                                "id": "second",
+                                                "href": "[lang]/ad/oferta-ID4abc",
+                                            },
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    }
+
+    assert extract_listing_items(next_data_json) == [
+        {"id": "first", "title": "Oferta z cache"},
+        {"id": "second", "href": "[lang]/ad/oferta-ID4abc"},
     ]
 
 
@@ -305,9 +362,12 @@ def test_ingest_estates_for_resume_continues_past_duplicate_pages() -> None:
         requested_urls.append(url)
 
         if "page=1" in url:
-            listing_id = "already-seen"
+            listing_id = "already-seen-1"
 
         elif "page=2" in url:
+            listing_id = "already-seen-2"
+
+        elif "page=3" in url:
             listing_id = "new-listing"
 
         else:
@@ -336,7 +396,7 @@ def test_ingest_estates_for_resume_continues_past_duplicate_pages() -> None:
         max_page=3,
         fetcher=fetcher,
         detail_fetcher=None,
-        existing_external_ids={"already-seen"},
+        existing_external_ids={"already-seen-1", "already-seen-2"},
     )
 
     assert [estate.external_id for estate in estates] == ["new-listing"]
@@ -344,6 +404,47 @@ def test_ingest_estates_for_resume_continues_past_duplicate_pages() -> None:
         f"{MAIN_URL.rstrip('/')}/mieszkanie/mazowieckie?viewType=listing&page=1",
         f"{MAIN_URL.rstrip('/')}/mieszkanie/mazowieckie?viewType=listing&page=2",
         f"{MAIN_URL.rstrip('/')}/mieszkanie/mazowieckie?viewType=listing&page=3",
+    ]
+
+
+def test_ingest_estates_for_resume_stops_after_duplicate_page_threshold() -> None:
+    requested_urls: list[str] = []
+
+    def fetcher(url: str) -> Mapping[str, Any]:
+        requested_urls.append(url)
+        listing_id = f"already-seen-{len(requested_urls)}"
+
+        return {
+            "props": {
+                "pageProps": {
+                    "data": {
+                        "searchAds": {
+                            "items": [
+                                {
+                                    "id": listing_id,
+                                    "title": "Stara oferta",
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+
+    estates = ingest_estates_for(
+        "mieszkanie",
+        "mazowieckie",
+        max_page=10,
+        fetcher=fetcher,
+        detail_fetcher=None,
+        existing_external_ids={"already-seen-1", "already-seen-2"},
+        duplicate_page_stop_threshold=2,
+    )
+
+    assert estates == []
+    assert requested_urls == [
+        f"{MAIN_URL.rstrip('/')}/mieszkanie/mazowieckie?viewType=listing&page=1",
+        f"{MAIN_URL.rstrip('/')}/mieszkanie/mazowieckie?viewType=listing&page=2",
     ]
 
 
@@ -394,6 +495,65 @@ def test_ingest_estates_for_resumes_from_start_page_and_reports_progress() -> No
     assert completed_pages == [
         ("mieszkanie", "mazowieckie", 7),
         ("mieszkanie", "mazowieckie", 8),
+    ]
+
+
+def test_iter_estates_uses_price_shards_and_shard_checkpoints() -> None:
+    requested_queries: list[dict[str, list[str]]] = []
+    completed_pages: list[tuple[str, str, int]] = []
+
+    def fetcher(url: str) -> Mapping[str, Any]:
+        query = parse_qs(urlsplit(url).query)
+        requested_queries.append(query)
+        listing_id = "|".join(
+            f"{key}={','.join(value)}"
+            for key, value in sorted(query.items())
+            if key.startswith("search[")
+        )
+
+        return {
+            "props": {
+                "pageProps": {
+                    "data": {
+                        "searchAds": {
+                            "items": [
+                                {
+                                    "id": listing_id,
+                                    "title": f"Oferta {listing_id}",
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+
+    def record_progress(estate_type: str, voivodeship: str, page: int) -> None:
+        completed_pages.append((estate_type, voivodeship, page))
+
+    estates = list(
+        iter_estates(
+            estate_types=("mieszkanie",),
+            voivodeships=("mazowieckie",),
+            max_page=1,
+            workers=1,
+            fetcher=fetcher,
+            detail_fetcher=None,
+            search_shard_strategy="price",
+            progress_callback=record_progress,
+        )
+    )
+
+    price_shards = build_search_shards("price")
+    expected_target_keys = [
+        f"mieszkanie__{price_shard.key}" for price_shard in price_shards
+    ]
+
+    assert len(estates) == len(price_shards)
+    assert len(requested_queries) == len(price_shards)
+    assert requested_queries[0]["search[filter_float_price:to]"] == ["300000"]
+    assert completed_pages == [
+        (target_key, "mazowieckie", 1) for target_key in expected_target_keys
     ]
 
 

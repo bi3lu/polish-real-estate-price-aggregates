@@ -83,7 +83,7 @@ def test_run_cli_calls_ingester_with_selected_filters_and_prints_json(
         return [
             RawListingObservation(
                 external_id="listing-1",
-                title="Pierwsza oferta",
+                title="Synthetic First Listing",
                 estate_type="mieszkanie",
                 voivodeship="mazowieckie",
             )

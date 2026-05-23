@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 from src.config.source_config import SourceDefinition
 from src.ingestion.adapters.base import (
@@ -11,7 +11,10 @@ from src.ingestion.adapters.base import (
     HtmlListingSourceAdapter,
     PaginatedListingSourceAdapter,
 )
+from src.ingestion.models import CanonicalListing
 from src.ingestion.pipeline import ingest_canonical_listings
+
+FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sources"
 
 
 def test_embedded_json_adapter_parses_and_normalizes_listing_fixture() -> None:
@@ -20,70 +23,44 @@ def test_embedded_json_adapter_parses_and_normalizes_listing_fixture() -> None:
         property_types=("mieszkanie",),
         voivodeships=("mazowieckie",),
         max_pages=1,
-        fetcher=lambda url: json.dumps(
-            {
-                "searchAds": {
-                    "items": [
-                        {
-                            "id": "listing-1",
-                            "title": "Synthetic apartment",
-                            "totalPrice": 500000,
-                            "pricePerSquareMeter": 10000,
-                            "areaInSquareMeters": 50,
-                            "roomsNumber": "TWO",
-                            "location": {
-                                "address": {
-                                    "city": "Warszawa",
-                                    "district": "Wola",
-                                }
-                            },
-                            "advertiserType": "AGENCY",
-                        }
-                    ]
-                }
-            }
-        ),
+        fetcher=lambda url: _fixture_text("source_a", "listing_payload.json"),
         processed_at=datetime(2026, 5, 23, 12, 0, tzinfo=timezone.utc),
     )
 
     listings = ingest_canonical_listings((adapter,))
 
     assert len(listings) == 1
-    assert listings[0].record_id == "source_a:listing-1"
+    assert isinstance(listings[0], CanonicalListing)
+    assert listings[0].record_id == "source_a:listing-a-json-001"
     assert listings[0].source_id == "source_a"
-    assert listings[0].external_id == "listing-1"
+    assert listings[0].external_id == "listing-a-json-001"
     assert listings[0].estate_type == "mieszkanie"
     assert listings[0].voivodeship == "mazowieckie"
-    assert listings[0].price_pln == 500000
-    assert listings[0].price_per_sqm_pln == 10000
+    assert listings[0].price_pln == 750000
+    assert listings[0].price_per_sqm_pln == 15000
     assert listings[0].area_sqm == 50
-    assert listings[0].rooms == 2
-    assert listings[0].city == "Warszawa"
-    assert listings[0].district == "Wola"
+    assert listings[0].rooms == 3
+    assert listings[0].city == "Example City"
+    assert listings[0].district == "Example District"
+    assert listings[0].location == "Example Street, Example District, Example City"
 
 
 def test_html_adapter_extracts_embedded_next_data_fixture() -> None:
-    html = """
-    <html>
-      <script id="__NEXT_DATA__" type="application/json">
-        {"searchAds": {"items": [{"id": "html-1", "title": "HTML listing"}]}}
-      </script>
-    </html>
-    """
     adapter = HtmlListingSourceAdapter(
         config=_source_definition("html_listing_site"),
         property_types=("mieszkanie",),
         voivodeships=("mazowieckie",),
         max_pages=1,
-        fetcher=lambda url: html,
+        fetcher=lambda url: _fixture_text("source_b", "search_page.html"),
         processed_at=datetime(2026, 5, 23, 12, 0, tzinfo=timezone.utc),
     )
 
     listings = ingest_canonical_listings((adapter,))
 
     assert len(listings) == 1
-    assert listings[0].record_id == "source_a:html-1"
-    assert listings[0].title == "HTML listing"
+    assert listings[0].record_id == "source_a:listing-b-001"
+    assert listings[0].title == "Synthetic HTML Listing"
+    assert listings[0].city == "Example Harbor"
 
 
 def test_paginated_adapter_builds_configured_search_urls() -> None:
@@ -104,6 +81,10 @@ def test_paginated_adapter_builds_configured_search_urls() -> None:
         "https://example-listing-site.local/search"
         "?property=mieszkanie&region=pomorskie&page=2",
     ]
+
+
+def _fixture_text(source_id: str, filename: str) -> str:
+    return (FIXTURE_ROOT / source_id / filename).read_text(encoding="utf-8")
 
 
 def _source_definition(adapter_type: str) -> SourceDefinition:

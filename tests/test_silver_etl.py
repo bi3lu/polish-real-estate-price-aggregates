@@ -24,12 +24,12 @@ def test_normalize_estate_returns_flat_silver_record() -> None:
             source_id="Source A",
             external_id=" 123 ",
             url=" https://example.invalid/offer ",
-            title="  Duże   mieszkanie  ",
+            title="  Synthetic   Silver Listing  ",
             estate_type="Mieszkanie",
             voivodeship="Mazowieckie",
-            city=" Warszawa ",
-            district=" Mokotów ",
-            street=" Puławska ",
+            city=" Example City ",
+            district=" Example District ",
+            street=" Example Street ",
             price=750000,
             price_per_sqm=15000,
             area_sqm=50,
@@ -37,7 +37,7 @@ def test_normalize_estate_returns_flat_silver_record() -> None:
             floor=2,
             market="SECONDARY",
             building_type="BLOCK",
-            seller_name=" Biuro Testowe ",
+            seller_name=" Synthetic Seller ",
             seller_type="AGENCY",
             latitude=52.1,
             longitude=21.2,
@@ -80,10 +80,10 @@ def test_normalize_estate_returns_flat_silver_record() -> None:
     assert silver_estate is not None
     assert silver_estate.record_id == "source_a:123"
     assert silver_estate.source_id == "source_a"
-    assert silver_estate.title == "Duże mieszkanie"
+    assert silver_estate.title == "Synthetic Silver Listing"
     assert silver_estate.estate_type == "mieszkanie"
     assert silver_estate.voivodeship == "mazowieckie"
-    assert silver_estate.location == "Puławska, Mokotów, Warszawa"
+    assert silver_estate.location == "Example Street, Example District, Example City"
     assert silver_estate.price_pln == 750000
     assert silver_estate.price_per_sqm_pln == 15000
     assert silver_estate.rent_pln == 850
@@ -179,7 +179,7 @@ def test_load_bronze_snapshot_supports_streaming_jsonl(tmp_path: Path) -> None:
                         "data": {
                             "source_id": "source_a",
                             "external_id": "listing-1",
-                            "title": "Oferta",
+                            "title": "Synthetic Snapshot Listing",
                         },
                     }
                 ),
@@ -308,7 +308,7 @@ def test_run_bronze_to_silver_writes_normalized_csv(tmp_path: Path) -> None:
                     {
                         "source_id": "source_a",
                         "external_id": "listing-1",
-                        "title": "Oferta",
+                        "title": "Synthetic Bronze Listing",
                         "price": 500000,
                     }
                 ],

@@ -22,7 +22,7 @@ def test_save_estates_to_bronze_writes_snapshot_json(tmp_path: Path) -> None:
         [
             RawListingObservation(
                 external_id="listing-1",
-                title="Pierwsza oferta",
+                title="Synthetic First Listing",
                 estate_type="mieszkanie",
                 voivodeship="mazowieckie",
             )
@@ -63,13 +63,13 @@ def test_stream_estates_to_bronze_writes_jsonl_incrementally(tmp_path: Path) -> 
             [
                 RawListingObservation(
                     external_id="listing-1",
-                    title="Pierwsza oferta",
+                    title="Synthetic First Listing",
                     estate_type="mieszkanie",
                     voivodeship="mazowieckie",
                 ),
                 RawListingObservation(
                     external_id="listing-2",
-                    title="Druga oferta",
+                    title="Synthetic Second Listing",
                     estate_type="dom",
                     voivodeship="pomorskie",
                 ),

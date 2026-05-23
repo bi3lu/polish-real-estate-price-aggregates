@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from src.config.globals import BRONZE_STREAM_CHECKPOINT_INTERVAL
-from src.models.estate import Estate
+from src.ingestion.models import RawListingObservation
 from src.utils.storage import (
     load_bronze_external_ids_by_voivodeship,
     load_bronze_page_checkpoints,
@@ -20,7 +20,7 @@ from src.utils.storage import (
 def test_save_estates_to_bronze_writes_snapshot_json(tmp_path: Path) -> None:
     output_path = save_estates_to_bronze(
         [
-            Estate(
+            RawListingObservation(
                 external_id="listing-1",
                 title="Pierwsza oferta",
                 estate_type="mieszkanie",
@@ -32,31 +32,42 @@ def test_save_estates_to_bronze_writes_snapshot_json(tmp_path: Path) -> None:
         max_page=2,
         output_dir=tmp_path,
         scraped_at=datetime(2026, 5, 15, 12, 30, 45, tzinfo=timezone.utc),
+        adapter_types_by_source_id={"source_a": "embedded_json_listing_site"},
     )
 
-    assert output_path == tmp_path / "estate_snapshot_20260515T123045000000Z.json"
+    assert output_path == tmp_path / "manifest.json"
 
     payload = json.loads(output_path.read_text(encoding="utf-8"))
+    source_manifest_path = (
+        tmp_path / "source_a" / "2026-05-15T12-30-45Z" / "manifest.json"
+    )
+    source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
 
-    assert payload["scraped_at"] == "2026-05-15T12:30:45+00:00"
+    assert payload["updated_at"] == "2026-05-15T12:30:45+00:00"
+    assert payload["run_manifests"]["source_a"]["path"] == str(source_manifest_path)
+    assert source_manifest["source_id"] == "source_a"
+    assert source_manifest["run_id"] == "2026-05-15T12-30-45Z"
+    assert source_manifest["started_at"] == "2026-05-15T12:30:45Z"
+    assert source_manifest["finished_at"] == "2026-05-15T12:30:45Z"
     assert payload["estate_types"] == ["mieszkanie"]
     assert payload["voivodeships"] == ["mazowieckie"]
     assert payload["max_page"] == 2
-    assert payload["count"] == 1
-    assert payload["data"][0]["external_id"] == "listing-1"
+    assert payload["new_records_count"] == 1
+    assert source_manifest["records_raw"] == 1
+    assert source_manifest["records_canonical"] == 1
 
 
 def test_stream_estates_to_bronze_writes_jsonl_incrementally(tmp_path: Path) -> None:
     output_path, count = stream_estates_to_bronze(
         iter(
             [
-                Estate(
+                RawListingObservation(
                     external_id="listing-1",
                     title="Pierwsza oferta",
                     estate_type="mieszkanie",
                     voivodeship="mazowieckie",
                 ),
-                Estate(
+                RawListingObservation(
                     external_id="listing-2",
                     title="Druga oferta",
                     estate_type="dom",
@@ -69,33 +80,35 @@ def test_stream_estates_to_bronze_writes_jsonl_incrementally(tmp_path: Path) -> 
         max_page=2,
         output_dir=tmp_path,
         scraped_at=datetime(2026, 5, 15, 12, 30, 45, tzinfo=timezone.utc),
+        adapter_types_by_source_id={"source_a": "embedded_json_listing_site"},
     )
 
     assert count == 2
-    assert output_path == tmp_path / "estate_snapshot_manifest.json"
+    assert output_path == tmp_path / "manifest.json"
 
     manifest = json.loads(output_path.read_text(encoding="utf-8"))
-    mazowieckie_path = Path(manifest["files"]["mazowieckie"]["path"])
-    pomorskie_path = Path(manifest["files"]["pomorskie"]["path"])
-    assert mazowieckie_path == (
-        tmp_path / "mazowieckie" / "estate_snapshot_mazowieckie.jsonl"
+    source_path = Path(manifest["files"]["source_a"]["path"])
+    source_manifest_path = (
+        tmp_path / "source_a" / "2026-05-15T12-30-45Z" / "manifest.json"
     )
-    assert pomorskie_path == (
-        tmp_path / "pomorskie" / "estate_snapshot_pomorskie.jsonl"
+    assert source_path == (
+        tmp_path / "source_a" / "2026-05-15T12-30-45Z" / "observations.jsonl"
     )
-    mazowieckie_lines = [
+    assert manifest["run_manifests"]["source_a"]["path"] == str(source_manifest_path)
+    source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
+    source_lines = [
         json.loads(line)
-        for line in mazowieckie_path.read_text(encoding="utf-8").splitlines()
-    ]
-    pomorskie_lines = [
-        json.loads(line)
-        for line in pomorskie_path.read_text(encoding="utf-8").splitlines()
+        for line in source_path.read_text(encoding="utf-8").splitlines()
     ]
 
-    assert mazowieckie_lines[0]["record_type"] == "estate"
-    assert mazowieckie_lines[0]["data"]["external_id"] == "listing-1"
-    assert pomorskie_lines[0]["record_type"] == "estate"
-    assert pomorskie_lines[0]["data"]["external_id"] == "listing-2"
+    assert source_manifest["pages_requested"] == 8
+    assert source_manifest["pages_succeeded"] == 8
+    assert source_manifest["adapter_type"] == "embedded_json_listing_site"
+    assert all(line["record_type"] == "estate" for line in source_lines)
+    assert [line["data"]["external_id"] for line in source_lines] == [
+        "listing-1",
+        "listing-2",
+    ]
 
 
 def test_stream_estates_to_bronze_skips_existing_external_ids(
@@ -125,8 +138,14 @@ def test_stream_estates_to_bronze_skips_existing_external_ids(
     output_path, count = stream_estates_to_bronze(
         iter(
             [
-                Estate(external_id="listing-1", voivodeship="mazowieckie"),
-                Estate(external_id="listing-2", voivodeship="mazowieckie"),
+                RawListingObservation(
+                    external_id="listing-1",
+                    voivodeship="mazowieckie",
+                ),
+                RawListingObservation(
+                    external_id="listing-2",
+                    voivodeship="mazowieckie",
+                ),
             ]
         ),
         estate_types=("mieszkanie",),
@@ -137,20 +156,17 @@ def test_stream_estates_to_bronze_skips_existing_external_ids(
     )
 
     manifest = json.loads(output_path.read_text(encoding="utf-8"))
-    canonical_path = existing_dir / "estate_snapshot_mazowieckie.jsonl"
-    canonical_lines = [
+    source_path = Path(manifest["files"]["source_a"]["path"])
+    source_lines = [
         json.loads(line)
-        for line in canonical_path.read_text(encoding="utf-8").splitlines()
+        for line in source_path.read_text(encoding="utf-8").splitlines()
     ]
 
     assert count == 1
     assert manifest["duplicates_skipped"] == 1
-    assert manifest["files"]["mazowieckie"]["new_records_count"] == 1
-    assert all(line["record_type"] == "estate" for line in canonical_lines)
-    assert [line["data"]["external_id"] for line in canonical_lines] == [
-        "listing-1",
-        "listing-2",
-    ]
+    assert manifest["files"]["source_a"]["new_records_count"] == 1
+    assert all(line["record_type"] == "estate" for line in source_lines)
+    assert [line["data"]["external_id"] for line in source_lines] == ["listing-2"]
     assert load_bronze_external_ids_by_voivodeship(tmp_path)["mazowieckie"] == {
         "source_a:listing-1",
         "source_a:listing-2",
@@ -160,8 +176,11 @@ def test_stream_estates_to_bronze_skips_existing_external_ids(
 def test_stream_estates_to_bronze_persists_partial_records_on_error(
     tmp_path: Path,
 ) -> None:
-    def estates() -> Iterable[Estate]:
-        yield Estate(external_id="listing-1", voivodeship="malopolskie")
+    def estates() -> Iterable[RawListingObservation]:
+        yield RawListingObservation(
+            external_id="listing-1",
+            voivodeship="malopolskie",
+        )
         raise RuntimeError("HTTP Error 403: Forbidden")
 
     try:
@@ -177,7 +196,9 @@ def test_stream_estates_to_bronze_persists_partial_records_on_error(
     except RuntimeError:
         pass
 
-    canonical_path = tmp_path / "malopolskie" / "estate_snapshot_malopolskie.jsonl"
+    canonical_path = (
+        tmp_path / "source_a" / "2026-05-15T12-30-45Z" / "observations.jsonl"
+    )
     lines = [
         json.loads(line)
         for line in canonical_path.read_text(encoding="utf-8").splitlines()
@@ -190,20 +211,22 @@ def test_stream_estates_to_bronze_persists_partial_records_on_error(
 def test_stream_estates_to_bronze_checkpoints_during_iteration(
     tmp_path: Path,
 ) -> None:
-    canonical_path = tmp_path / "malopolskie" / "estate_snapshot_malopolskie.jsonl"
+    canonical_path = (
+        tmp_path / "source_a" / "2026-05-15T12-30-45Z" / "observations.jsonl"
+    )
     checkpoint_seen = False
 
-    def estates() -> Iterable[Estate]:
+    def estates() -> Iterable[RawListingObservation]:
         nonlocal checkpoint_seen
 
         for index in range(BRONZE_STREAM_CHECKPOINT_INTERVAL):
-            yield Estate(
+            yield RawListingObservation(
                 external_id=f"listing-{index}",
                 voivodeship="malopolskie",
             )
 
         checkpoint_seen = canonical_path.exists()
-        yield Estate(
+        yield RawListingObservation(
             external_id="listing-after-checkpoint",
             voivodeship="malopolskie",
         )
@@ -224,7 +247,7 @@ def test_stream_estates_to_bronze_checkpoints_during_iteration(
 
     assert checkpoint_seen is True
     assert count == BRONZE_STREAM_CHECKPOINT_INTERVAL + 1
-    assert manifest["files"]["malopolskie"]["new_records_count"] == count
+    assert manifest["files"]["source_a"]["new_records_count"] == count
     assert all(line["record_type"] == "estate" for line in lines)
     assert len(lines) == count
 
@@ -235,7 +258,7 @@ def test_stream_estates_to_bronze_writes_page_checkpoints(
     output_path, _ = stream_estates_to_bronze(
         iter(
             [
-                Estate(
+                RawListingObservation(
                     external_id="listing-1",
                     estate_type="mieszkanie",
                     voivodeship="malopolskie",

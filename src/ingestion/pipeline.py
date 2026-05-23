@@ -13,21 +13,22 @@ from _thread import LockType
 
 from src.config.globals import (
     DEFAULT_SOURCE_ID,
-    ESTATE_URL,
     ESTATE_TYPES,
+    ESTATE_URL,
     MAX_PAGE,
     RESUME_DUPLICATE_PAGE_STOP_THRESHOLD,
     VOIVODESHIPS,
 )
 from src.config.source_config import SourceDefinition
 from src.config.types import IngestionProgressCallback, SearchShardStrategy
+from src.ingestion.adapters.base import SourceAdapter
+from src.ingestion.models import CanonicalListing, RawListingObservation
 from src.ingestion.parsing import (
     enrich_listing_item,
     extract_listing_external_id,
     extract_listing_items,
     get_estate_info,
 )
-from src.ingestion.models import RawListingObservation
 from src.ingestion.transport import (
     RequestThrottle,
     build_listing_url,
@@ -36,6 +37,8 @@ from src.ingestion.transport import (
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+SourceInput = SourceDefinition | SourceAdapter | None
 
 
 @dataclass(frozen=True)
@@ -155,7 +158,7 @@ def ingest_estates_for(
     query_params: Mapping[str, str] | None = None,
     checkpoint_key: str | None = None,
     progress_callback: IngestionProgressCallback | None = None,
-    source: SourceDefinition | None = None,
+    source: SourceInput = None,
 ) -> list[RawListingObservation]:
     """Ingest listings for a single estate type and voivodeship.
 
@@ -207,7 +210,7 @@ def iter_estates_for(
     query_params: Mapping[str, str] | None = None,
     checkpoint_key: str | None = None,
     progress_callback: IngestionProgressCallback | None = None,
-    source: SourceDefinition | None = None,
+    source: SourceInput = None,
 ) -> Iterable[RawListingObservation]:
     """Yield listings for a single estate type and voivodeship.
 
@@ -253,11 +256,14 @@ def iter_estates_for(
     duplicate_only_page_count = 0
     seen_page_signatures: set[tuple[str, ...]] = set()
     target_key = checkpoint_key or estate_type
-    source_id = source.source_id if source is not None else DEFAULT_SOURCE_ID
-    detail_base_url = source.base_url if source is not None else ESTATE_URL
+    source_config = _source_config(source)
+    source_id = _source_id(source)
+    detail_base_url = (
+        source_config.base_url if source_config is not None else ESTATE_URL
+    )
     source_throttle = (
-        RequestThrottle(rate_limit_seconds=source.rate_limit_seconds)
-        if source is not None
+        RequestThrottle(rate_limit_seconds=source_config.rate_limit_seconds)
+        if source_config is not None
         else None
     )
 
@@ -275,6 +281,7 @@ def iter_estates_for(
             return detail_fetcher(url)
 
         return fetch_next_data_json(url, throttle=source_throttle)
+
     logger.info(
         "Streaming ingestion started for estate_type=%s voivodeship=%s target=%s "
         "max_page=%s start_page=%s existing_ids=%s query_params=%s",
@@ -293,7 +300,7 @@ def iter_estates_for(
             voivodeship,
             page=page,
             query_params=query_params,
-            source=source,
+            source=source_config,
         )
         logger.info(
             "Fetching listing page %s for estate_type=%s voivodeship=%s target=%s",
@@ -494,7 +501,7 @@ def iter_estates(
     duplicate_page_stop_threshold: int = RESUME_DUPLICATE_PAGE_STOP_THRESHOLD,
     search_shard_strategy: SearchShardStrategy = "none",
     progress_callback: IngestionProgressCallback | None = None,
-    sources: Iterable[SourceDefinition | None] | None = None,
+    sources: Iterable[SourceInput] | None = None,
 ) -> Iterable[RawListingObservation]:
     """Yield listings for all requested estate type and voivodeship combinations.
 
@@ -608,7 +615,7 @@ def iter_estates_threaded(
     duplicate_page_stop_threshold: int = RESUME_DUPLICATE_PAGE_STOP_THRESHOLD,
     search_shard_strategy: SearchShardStrategy = "none",
     progress_callback: IngestionProgressCallback | None = None,
-    sources: Iterable[SourceDefinition | None] | None = None,
+    sources: Iterable[SourceInput] | None = None,
 ) -> Iterable[RawListingObservation]:
     """Yield listings using worker threads split by filter combinations.
 
@@ -678,7 +685,7 @@ def iter_estates_threaded(
     )
 
     def ingest_target(
-        source: SourceDefinition | None,
+        source: SourceInput,
         estate_type: str,
         voivodeship: str,
         shard: SearchShard,
@@ -813,7 +820,7 @@ def ingest_estates(
     duplicate_page_stop_threshold: int = RESUME_DUPLICATE_PAGE_STOP_THRESHOLD,
     search_shard_strategy: SearchShardStrategy = "none",
     progress_callback: IngestionProgressCallback | None = None,
-    sources: Iterable[SourceDefinition | None] | None = None,
+    sources: Iterable[SourceInput] | None = None,
 ) -> list[RawListingObservation]:
     """Ingest listings for all requested estate type and voivodeship combinations.
 
@@ -868,6 +875,24 @@ def ingest_estates(
     return estates
 
 
+def iter_canonical_listings(
+    adapters: Iterable[SourceAdapter],
+) -> Iterable[CanonicalListing]:
+    """Yield canonical listings from neutral source adapters."""
+    for adapter in adapters:
+        for url in adapter.build_search_urls():
+            payload = adapter.fetch(url)
+            observations = adapter.parse(payload)
+            yield from adapter.normalize(observations)
+
+
+def ingest_canonical_listings(
+    adapters: Iterable[SourceAdapter],
+) -> list[CanonicalListing]:
+    """Run neutral source adapters and collect canonical listings."""
+    return list(iter_canonical_listings(adapters))
+
+
 def _target_start_page(
     start_pages_by_target: Mapping[str, Mapping[str, int]] | None,
     *,
@@ -893,7 +918,7 @@ def _target_key(estate_type: str, shard: SearchShard) -> str:
 
 
 def _source_target_key(
-    source: SourceDefinition | None,
+    source: SourceInput,
     estate_type: str,
     shard: SearchShard,
 ) -> str:
@@ -902,19 +927,38 @@ def _source_target_key(
 
 
 def _resolve_sources(
-    sources: Iterable[SourceDefinition | None] | None,
-) -> tuple[SourceDefinition | None, ...]:
+    sources: Iterable[SourceInput] | None,
+) -> tuple[SourceInput, ...]:
     if sources is None:
         return (None,)
 
-    return tuple(source for source in sources if source is None or source.enabled)
+    return tuple(
+        source
+        for source in sources
+        if source is None or getattr(source, "enabled", True)
+    )
 
 
-def _source_id(source: SourceDefinition | None) -> str:
+def _source_id(source: SourceInput) -> str:
     if source is None:
         return DEFAULT_SOURCE_ID
 
     return source.source_id
+
+
+def _source_config(source: SourceInput) -> SourceDefinition | None:
+    if source is None:
+        return None
+
+    if isinstance(source, SourceDefinition):
+        return source
+
+    config = getattr(source, "config", None)
+
+    if isinstance(config, SourceDefinition):
+        return config
+
+    return None
 
 
 def _listing_dedupe_key(listing: RawListingObservation) -> str:

@@ -13,12 +13,12 @@ from src.etl.gold import (
     run_silver_to_gold,
     transform_silver_records,
 )
-from src.models.silver_estate import SilverEstate
+from src.ingestion.models import CanonicalListing
 
 
 def test_build_listing_feature_derives_ml_ready_fields() -> None:
     feature = build_listing_feature(
-        SilverEstate(
+        CanonicalListing(
             record_id="source_a:1",
             source_id="source_a",
             external_id="1",
@@ -61,7 +61,7 @@ def test_build_listing_feature_derives_ml_ready_fields() -> None:
 
 def test_transform_silver_records_builds_gold_tables() -> None:
     records = [
-        SilverEstate(
+        CanonicalListing(
             record_id="source_a:1",
             source_id="source_a",
             external_id="1",
@@ -84,7 +84,7 @@ def test_transform_silver_records_builds_gold_tables() -> None:
             has_location=True,
             processed_at="2026-05-17T12:00:00+00:00",
         ),
-        SilverEstate(
+        CanonicalListing(
             record_id="source_a:2",
             source_id="source_a",
             external_id="2",
@@ -139,7 +139,7 @@ def test_load_silver_snapshot_parses_csv_types(tmp_path: Path) -> None:
     with silver_path.open("w", encoding="utf-8", newline="") as output_file:
         writer = csv.DictWriter(
             output_file,
-            fieldnames=list(SilverEstate.model_fields),
+            fieldnames=list(CanonicalListing.model_fields),
         )
         writer.writeheader()
         writer.writerow(
@@ -176,7 +176,7 @@ def test_run_silver_to_gold_writes_all_gold_tables(tmp_path: Path) -> None:
     with silver_path.open("w", encoding="utf-8", newline="") as output_file:
         writer = csv.DictWriter(
             output_file,
-            fieldnames=list(SilverEstate.model_fields),
+            fieldnames=list(CanonicalListing.model_fields),
         )
         writer.writeheader()
         writer.writerow(

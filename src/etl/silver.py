@@ -82,13 +82,20 @@ def find_latest_bronze_snapshot(bronze_dir: Path = BRONZE_DATA_DIR) -> Path:
     Raises:
         FileNotFoundError: If no bronze snapshots are present.
     """
-    canonical_manifest = bronze_dir / "estate_snapshot_manifest.json"
+    canonical_manifest = bronze_dir / "manifest.json"
 
     if canonical_manifest.exists():
         return canonical_manifest
 
+    legacy_manifest = bronze_dir / "estate_snapshot_manifest.json"
+
+    if legacy_manifest.exists():
+        return legacy_manifest
+
     snapshots = sorted(
         [
+            *bronze_dir.glob("*/*/manifest.json"),
+            *bronze_dir.glob("*/*/observations.jsonl"),
             *bronze_dir.glob("estate_snapshot_manifest_*.json"),
             *bronze_dir.glob("estate_snapshot_*.json"),
             *bronze_dir.glob("estate_snapshot_*.jsonl"),
@@ -180,6 +187,11 @@ def _find_canonical_voivodeship_snapshots(bronze_dir: Path) -> list[Path]:
     if not bronze_dir.exists():
         return snapshots
 
+    source_run_snapshots = sorted(bronze_dir.glob("*/*/observations.jsonl"))
+
+    if source_run_snapshots:
+        return source_run_snapshots
+
     for voivodeship_dir in sorted(
         path for path in bronze_dir.iterdir() if path.is_dir()
     ):
@@ -243,10 +255,16 @@ def _load_bronze_manifest(
         )
 
     for file_info in files.values():
-        if not isinstance(file_info, dict):
-            continue
+        path_value: Any
 
-        path_value = file_info.get("path")
+        if isinstance(file_info, str):
+            path_value = file_info
+
+        elif isinstance(file_info, dict):
+            path_value = file_info.get("path")
+
+        else:
+            continue
 
         if not isinstance(path_value, str):
             continue
@@ -545,7 +563,43 @@ def save_silver_snapshot(
         for record in records:
             writer.writerow(_serialize_csv_row(record))
 
+    _save_canonical_listing_partitions(
+        records,
+        output_dir=output_dir,
+        processed_at=snapshot_time,
+    )
+
     return output_path
+
+
+def _save_canonical_listing_partitions(
+    records: list[CanonicalListing],
+    *,
+    output_dir: Path,
+    processed_at: datetime,
+) -> None:
+    month = processed_at.strftime("%Y-%m")
+    records_by_source: dict[str, list[CanonicalListing]] = {}
+
+    for record in records:
+        records_by_source.setdefault(record.source_id, []).append(record)
+
+    for source_id, source_records in sorted(records_by_source.items()):
+        partition_dir = (
+            output_dir
+            / "canonical_listings"
+            / f"source_id={source_id}"
+            / f"month={month}"
+        )
+        partition_dir.mkdir(parents=True, exist_ok=True)
+        output_path = partition_dir / "listings.jsonl"
+
+        with output_path.open("w", encoding="utf-8") as output_file:
+            for record in source_records:
+                output_file.write(
+                    json.dumps(record.model_dump(mode="json"), ensure_ascii=False)
+                    + "\n"
+                )
 
 
 def _build_silver_filename(processed_at: datetime) -> str:

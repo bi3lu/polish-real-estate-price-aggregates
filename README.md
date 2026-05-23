@@ -291,6 +291,13 @@ uv run python -m src.etl.public
 Each stage selects the latest input snapshot from the previous layer by default
 and writes timestamped CSV outputs to the next layer.
 
+Bronze storage is partitioned by neutral `source_id` and per-source `run_id`.
+Each run writes `data/bronze/<source_id>/<run_id>/manifest.json` plus local raw
+observation data, and the root `data/bronze/manifest.json` indexes the latest
+run manifests. Silver additionally writes canonical JSONL partitions under
+`data/silver/canonical_listings/source_id=<source_id>/month=<YYYY-MM>/`.
+Bronze, silver, gold, and demo data directories are ignored by Git.
+
 ## Market Ranking CLI
 
 After a public dataset exists, generate quick analytical rankings from the

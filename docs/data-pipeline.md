@@ -44,8 +44,9 @@ flowchart TD
 
 The pipeline follows a layered data engineering pattern:
 
-- `bronze`: raw ingested records and resume metadata.
-- `silver`: normalized listing records with validated fields.
+- `bronze`: source-id partitioned run data and per-run manifests.
+- `silver`: normalized listing records with validated fields, including
+  source-id and month partitioned canonical JSONL outputs.
 - `gold`: model-ready features, geographic aggregates, segment aggregates, and
   quality metrics.
 - `public`: anonymized records designed for safe public analysis.

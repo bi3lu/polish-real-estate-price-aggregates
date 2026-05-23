@@ -14,13 +14,13 @@ from pydantic import ValidationError
 
 from src.config.globals import GOLD_DATA_DIR, SILVER_DATA_DIR
 from src.config.types import T
+from src.ingestion.models import CanonicalListing
 from src.models.gold_estate import (
     GoldDataQuality,
     GoldGeoAggregate,
     GoldListingFeature,
     GoldSegmentAggregate,
 )
-from src.ingestion.models import CanonicalListing
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

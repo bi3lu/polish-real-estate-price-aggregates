@@ -4,18 +4,18 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from src.config.env import PROJECT_ROOT
+from src.config.globals import PROJECT_ROOT
 
 DEFAULT_SOURCE_CONFIG_DIR = PROJECT_ROOT / "config"
 EXAMPLE_SOURCE_CONFIG_PATH = DEFAULT_SOURCE_CONFIG_DIR / "sources.example.yaml"
 LOCAL_SOURCE_CONFIG_PATH = DEFAULT_SOURCE_CONFIG_DIR / "sources.local.yaml"
 
-AdapterType = Literal["embedded_json_listing_site", "html_listing_site"]
+AdapterType = str
 
 
 class SourceDefinition(BaseModel):
@@ -43,6 +43,16 @@ class SourceDefinition(BaseModel):
 
         if any(character.isspace() for character in normalized):
             raise ValueError("source_id must not contain whitespace")
+
+        return normalized
+
+    @field_validator("adapter_type")
+    @classmethod
+    def validate_adapter_type(cls, value: str) -> str:
+        normalized = value.strip()
+
+        if not normalized:
+            raise ValueError("adapter_type must not be empty")
 
         return normalized
 
@@ -119,7 +129,10 @@ class SourceConfig(BaseModel):
 
 def default_source_config_path() -> Path:
     """Return the local source config path when present, otherwise the example."""
-    if LOCAL_SOURCE_CONFIG_PATH.exists():
+    if (
+        LOCAL_SOURCE_CONFIG_PATH.exists()
+        and LOCAL_SOURCE_CONFIG_PATH.stat().st_size > 0
+    ):
         return LOCAL_SOURCE_CONFIG_PATH
 
     return EXAMPLE_SOURCE_CONFIG_PATH

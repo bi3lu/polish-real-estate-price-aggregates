@@ -12,7 +12,7 @@ from src.config.globals import DEMO_BASE_DIR, DEMO_MIN_GROUP_SIZE, DEMO_PROCESSE
 from src.etl.gold import GoldOutputPaths, run_silver_to_gold
 from src.etl.public import PublicOutputPaths, run_gold_to_public
 from src.etl.silver import run_bronze_to_silver
-from src.models.estate import Estate
+from src.ingestion.models import RawListingObservation
 from src.utils.storage import save_estates_to_bronze
 
 
@@ -71,7 +71,7 @@ def run_demo_pipeline(
     )
 
 
-def build_demo_estates() -> list[Estate]:
+def build_demo_estates() -> list[RawListingObservation]:
     """Return a small, deterministic fixture dataset for offline demos."""
     return [
         _estate(
@@ -251,7 +251,7 @@ def _estate(
     longitude: float,
     extras: tuple[str, ...],
     terrain_area_sqm: float | None = None,
-) -> Estate:
+) -> RawListingObservation:
     attributes: dict[str, Any] = {
         "Build_year": str(build_year),
         "Building_floors_num": str(building_floors_num),
@@ -267,7 +267,7 @@ def _estate(
     if terrain_area_sqm is not None:
         attributes["Terrain_area"] = str(terrain_area_sqm)
 
-    return Estate(
+    return RawListingObservation(
         source_id="demo_fixture",
         external_id=external_id,
         url=f"https://example.invalid/demo/{external_id}",

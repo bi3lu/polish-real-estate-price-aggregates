@@ -6,9 +6,8 @@ from collections.abc import Mapping
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
-from src.config.source_config import SourceDefinition
-from src.config.env import normalize_url
 from src.config.globals import ESTATE_URL, MAIN_URL
+from src.config.source_config import SourceDefinition
 from src.ingestion.estate_ingestion import (
     build_listing_url,
     build_search_shards,
@@ -18,12 +17,6 @@ from src.ingestion.estate_ingestion import (
     ingest_estates_for,
     iter_estates,
 )
-
-
-def test_normalize_url() -> None:
-    assert normalize_url("  https://example.invalid/results/") == (
-        "https://example.invalid/results/"
-    )
 
 
 def test_build_listing_url_uses_estate_type_voivodeship_and_page() -> None:

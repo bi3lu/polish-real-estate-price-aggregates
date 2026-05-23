@@ -15,12 +15,12 @@ from src.etl.silver import (
     run_bronze_to_silver,
     transform_bronze_payload,
 )
-from src.models.estate import Estate
+from src.ingestion.models import RawListingObservation
 
 
 def test_normalize_estate_returns_flat_silver_record() -> None:
     silver_estate = normalize_estate(
-        Estate(
+        RawListingObservation(
             source_id="Source A",
             external_id=" 123 ",
             url=" https://example.invalid/offer ",
@@ -334,3 +334,18 @@ def test_run_bronze_to_silver_writes_normalized_csv(tmp_path: Path) -> None:
     assert rows[0]["has_price"] == "true"
     assert rows[0]["processed_at"] == "2026-05-15T13:00:00+00:00"
     assert rows[0]["bronze_scraped_at"] == "2026-05-15T12:00:00+00:00"
+
+    partition_path = (
+        silver_dir
+        / "canonical_listings"
+        / "source_id=source_a"
+        / "month=2026-05"
+        / "listings.jsonl"
+    )
+    partition_rows = [
+        json.loads(line)
+        for line in partition_path.read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert partition_rows[0]["record_id"] == "source_a:listing-1"
+    assert partition_rows[0]["source_id"] == "source_a"

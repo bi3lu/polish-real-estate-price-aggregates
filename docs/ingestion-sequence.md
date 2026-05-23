@@ -40,8 +40,8 @@ sequenceDiagram
     end
 
     CLI->>Store: stream_estates_to_bronze(...)
-    Store->>Bronze: append per-voivodeship JSONL records
-    Store->>Bronze: update manifest and checkpoints
+    Store->>Bronze: append source-id/run-id JSONL records
+    Store->>Bronze: write per-run manifests and checkpoints
     Store-->>CLI: output path and new record count
     CLI-->>User: JSON summary
 ```

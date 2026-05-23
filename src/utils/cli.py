@@ -20,8 +20,10 @@ from src.config.globals import (
     VOIVODESHIPS,
 )
 from src.config.source_config import load_source_config
+from src.ingestion.adapters.base import PaginatedListingSourceAdapter, SourceAdapter
 from src.ingestion.estate_ingestion import iter_estates
 from src.ingestion.models import RawListingObservation
+from src.ingestion.registry import build_adapters
 from src.utils.logger import get_logger
 from src.utils.storage import (
     load_bronze_external_ids_by_voivodeship,
@@ -218,7 +220,12 @@ def run_cli(
     validator()
     options = parse_cli_args(args)
     source_config = load_source_config(options.source_config_path)
-    enabled_sources = source_config.enabled_sources()
+    adapters = build_adapters(
+        source_config,
+        property_types=options.estate_types,
+        voivodeships=options.voivodeships,
+        max_pages=options.max_page,
+    )
     logger.info(
         "CLI run started: estate_types=%s voivodeships=%s max_page=%s workers=%s",
         ", ".join(options.estate_types),
@@ -265,7 +272,7 @@ def run_cli(
         duplicate_page_stop_threshold=options.duplicate_page_stop_threshold,
         search_shard_strategy=options.search_shard_strategy,
         progress_callback=progress_callback,
-        sources=enabled_sources,
+        sources=adapters,
     )
     output_path, count = saver(
         estates,
@@ -273,6 +280,7 @@ def run_cli(
         voivodeships=options.voivodeships,
         max_page=options.max_page,
         page_checkpoints_by_voivodeship=page_checkpoints_by_voivodeship,
+        adapter_types_by_source_id=_adapter_types_by_source_id(adapters),
     )
     logger.info("Bronze snapshot saved to %s with %s records", output_path, count)
     json.dump(
@@ -285,7 +293,7 @@ def run_cli(
             "ignore_checkpoints": options.ignore_checkpoints,
             "duplicate_page_stop_threshold": options.duplicate_page_stop_threshold,
             "search_shard_strategy": options.search_shard_strategy,
-            "source_ids": [source.source_id for source in enabled_sources],
+            "source_ids": [adapter.source_id for adapter in adapters],
         },
         stdout,
         ensure_ascii=False,
@@ -294,6 +302,16 @@ def run_cli(
     stdout.write("\n")
 
     return 0
+
+
+def _adapter_types_by_source_id(
+    adapters: Iterable[SourceAdapter],
+) -> dict[str, str]:
+    return {
+        adapter.source_id: adapter.config.adapter_type
+        for adapter in adapters
+        if isinstance(adapter, PaginatedListingSourceAdapter)
+    }
 
 
 def _resolve_values(

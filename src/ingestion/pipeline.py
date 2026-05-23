@@ -15,6 +15,7 @@ from src.config.globals import (
     DEFAULT_SOURCE_ID,
     ESTATE_TYPES,
     ESTATE_URL,
+    INGESTION_HARD_MAX_PAGES_PER_RUN,
     MAX_PAGE,
     RESUME_DUPLICATE_PAGE_STOP_THRESHOLD,
     VOIVODESHIPS,
@@ -248,6 +249,9 @@ def iter_estates_for(
             "duplicate_page_stop_threshold must be greater than or equal to 0"
         )
 
+    if max_page < 1:
+        raise ValueError("max_page must be greater than or equal to 1")
+
     total_estates_count = 0
     seen_external_ids: set[str] = {
         str(external_id) for external_id in existing_external_ids
@@ -258,6 +262,7 @@ def iter_estates_for(
     target_key = checkpoint_key or estate_type
     source_config = _source_config(source)
     source_id = _source_id(source)
+    effective_max_page = _effective_max_page(max_page, source_config)
     detail_base_url = (
         source_config.base_url if source_config is not None else ESTATE_URL
     )
@@ -284,17 +289,19 @@ def iter_estates_for(
 
     logger.info(
         "Streaming ingestion started for estate_type=%s voivodeship=%s target=%s "
-        "max_page=%s start_page=%s existing_ids=%s query_params=%s",
+        "requested_max_page=%s effective_max_page=%s start_page=%s "
+        "existing_ids=%s query_params=%s",
         estate_type,
         voivodeship,
         target_key,
         max_page,
+        effective_max_page,
         start_page,
         existing_external_ids_count,
         dict(query_params or {}),
     )
 
-    for page in range(start_page, max_page + 1):
+    for page in range(start_page, effective_max_page + 1):
         listing_url = build_listing_url(
             estate_type,
             voivodeship,
@@ -959,6 +966,18 @@ def _source_config(source: SourceInput) -> SourceDefinition | None:
         return config
 
     return None
+
+
+def _effective_max_page(
+    requested_max_page: int,
+    source_config: SourceDefinition | None,
+) -> int:
+    limits = [requested_max_page, INGESTION_HARD_MAX_PAGES_PER_RUN]
+
+    if source_config is not None:
+        limits.append(source_config.max_pages_default)
+
+    return min(limits)
 
 
 def _listing_dedupe_key(listing: RawListingObservation) -> str:

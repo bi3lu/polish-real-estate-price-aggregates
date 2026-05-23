@@ -80,6 +80,25 @@ def test_source_config_rejects_negative_rate_limit() -> None:
         SourceConfig.model_validate({"sources": [payload]})
 
 
+def test_source_config_requires_rate_limit_seconds() -> None:
+    payload = _source_payload("source_a")
+    payload.pop("rate_limit_seconds")
+
+    with pytest.raises(ValidationError):
+        SourceConfig.model_validate({"sources": [payload]})
+
+
+def test_source_config_applies_safe_defaults() -> None:
+    payload = _source_payload("source_a")
+    payload.pop("max_pages_default")
+    payload.pop("respect_robots_txt", None)
+
+    config = SourceConfig.model_validate({"sources": [payload]})
+
+    assert config.sources[0].max_pages_default == 3
+    assert config.sources[0].respect_robots_txt is True
+
+
 def _source_payload(source_id: str) -> dict[str, object]:
     return {
         "source_id": source_id,

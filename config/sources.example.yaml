@@ -6,6 +6,7 @@ sources:
     search_url_template: "https://example-listing-site.local/search?page={page}"
     rate_limit_seconds: 5
     max_pages_default: 3
+    respect_robots_txt: true
     allowed_offer_types:
       - sale
     allowed_property_types:
@@ -18,6 +19,7 @@ sources:
     search_url_template: "https://example-listing-site-2.local/offers?page={page}"
     rate_limit_seconds: 8
     max_pages_default: 3
+    respect_robots_txt: true
     allowed_offer_types:
       - sale
     allowed_property_types:

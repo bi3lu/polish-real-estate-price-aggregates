@@ -26,6 +26,8 @@ from src.config.globals import (
     REQUEST_BLOCK_RETRIES,
     REQUEST_BLOCK_STATUS_CODES,
     REQUEST_RETRIES,
+    REQUEST_RETRY_BACKOFF_MULTIPLIER,
+    REQUEST_RETRY_MAX_SLEEP_SECONDS,
     REQUEST_RETRY_SLEEP_SECONDS,
     REQUEST_TIMEOUT_SECONDS,
 )
@@ -247,6 +249,8 @@ def fetch_next_data_json(
     timeout_seconds: int = REQUEST_TIMEOUT_SECONDS,
     retries: int = REQUEST_RETRIES,
     retry_sleep_seconds: float = REQUEST_RETRY_SLEEP_SECONDS,
+    retry_backoff_multiplier: float = REQUEST_RETRY_BACKOFF_MULTIPLIER,
+    retry_max_sleep_seconds: float = REQUEST_RETRY_MAX_SLEEP_SECONDS,
     block_status_codes: frozenset[int] = REQUEST_BLOCK_STATUS_CODES,
     block_retries: int = REQUEST_BLOCK_RETRIES,
     block_cooldown_seconds: float = REQUEST_BLOCK_COOLDOWN_SECONDS,
@@ -263,6 +267,8 @@ def fetch_next_data_json(
         timeout_seconds: Socket timeout in seconds.
         retries: Number of request attempts.
         retry_sleep_seconds: Delay between failed attempts.
+        retry_backoff_multiplier: Exponential backoff multiplier for retries.
+        retry_max_sleep_seconds: Maximum delay between failed attempts.
         block_status_codes: HTTP status codes treated as source throttling.
         block_retries: Number of cooldown attempts allowed for source blocks.
         block_cooldown_seconds: Initial cooldown for source block responses.
@@ -357,7 +363,14 @@ def fetch_next_data_json(
             )
 
             if attempt < retries:
-                time.sleep(retry_sleep_seconds)
+                time.sleep(
+                    _retry_sleep_seconds(
+                        attempt=attempt,
+                        base_seconds=retry_sleep_seconds,
+                        backoff_multiplier=retry_backoff_multiplier,
+                        max_seconds=retry_max_sleep_seconds,
+                    )
+                )
 
         except (
             TimeoutError,
@@ -375,7 +388,14 @@ def fetch_next_data_json(
             )
 
             if attempt < retries:
-                time.sleep(retry_sleep_seconds)
+                time.sleep(
+                    _retry_sleep_seconds(
+                        attempt=attempt,
+                        base_seconds=retry_sleep_seconds,
+                        backoff_multiplier=retry_backoff_multiplier,
+                        max_seconds=retry_max_sleep_seconds,
+                    )
+                )
 
     raise RuntimeError(f"Could not fetch listing data for {url}") from last_error
 
@@ -401,6 +421,21 @@ def _block_cooldown_seconds(
         cooldown_seconds += random.uniform(0, jitter_seconds)
 
     return max(0.0, min(cooldown_seconds, max_seconds))
+
+
+def _retry_sleep_seconds(
+    *,
+    attempt: int,
+    base_seconds: float,
+    backoff_multiplier: float,
+    max_seconds: float,
+) -> float:
+    if base_seconds <= 0:
+        return 0.0
+
+    multiplier = max(1.0, backoff_multiplier)
+    sleep_seconds = base_seconds * (multiplier ** max(attempt - 1, 0))
+    return max(0.0, min(sleep_seconds, max_seconds))
 
 
 def _retry_after_seconds(exc: urllib.error.HTTPError) -> float | None:

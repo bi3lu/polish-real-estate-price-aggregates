@@ -20,6 +20,9 @@ The repository intentionally does not include source-service branding in the
 documentation. To run ingestion, provide source definitions in your private
 `config/sources.local.yaml` file.
 
+Raw bronze data is not published from this repository. Public sharing is limited
+to anonymized outputs in `data/public/`.
+
 ## Portfolio Highlights
 
 - End-to-end data engineering pipeline with bronze, silver, gold, and public
@@ -170,9 +173,16 @@ cp config/sources.example.yaml config/sources.local.yaml
 ```
 
 Each source defines `source_id`, `adapter_type`, `enabled`, `base_url`,
-`search_url_template`, `rate_limit_seconds`, `max_pages_default`,
+`search_url_template`, required `rate_limit_seconds`, `max_pages_default`,
+`respect_robots_txt`,
 `allowed_offer_types`, and `allowed_property_types`. The default loader uses
 `config/sources.local.yaml` when present, otherwise `config/sources.example.yaml`.
+
+Safe defaults are intentionally conservative:
+
+- CLI `--max-page` defaults to `3` and is hard-capped at `50` pages per target.
+- Each source can further lower pagination via `max_pages_default`.
+- HTTP retries use exponential backoff instead of fixed retry bursts.
 
 `config/sources.local.yaml` is intentionally ignored by Git. Do not commit real
 source URLs, credentials, or local configuration.
@@ -499,6 +509,9 @@ trade-offs are:
   pipeline is designed for careful periodic collection, not high-pressure
   crawling. If the source responds with `403` or `429`, the transport layer
   backs off with a shared cooldown before retrying.
+- This project does not include CAPTCHA-solving, challenge bypassing, identity
+  spoofing, or anti-bot evasion logic. If a source blocks or challenges access,
+  stop the run and reassess collection settings and source permissions.
 - Analytical outputs should be treated as exploratory. They are useful for data
   quality monitoring, feature engineering, dashboards, and ML baselines, but not
   as authoritative valuation or investment advice.
@@ -509,3 +522,6 @@ This project is for data engineering, analytics, and educational use. Respect
 the terms of the source service, applicable law, and responsible data handling
 practices. The generated datasets should not be used as the sole basis for
 legal, financial, valuation, or investment decisions.
+
+Additional responsible-collection rules are documented in
+[`docs/ethics.md`](docs/ethics.md).

@@ -70,6 +70,11 @@ def test_parse_cli_args_rejects_unknown_values() -> None:
         parse_cli_args(["--estate-type", "unknown"])
 
 
+def test_parse_cli_args_rejects_max_page_above_hard_cap() -> None:
+    with pytest.raises(SystemExit):
+        parse_cli_args(["--max-page", "51"])
+
+
 def test_run_cli_calls_ingester_with_selected_filters_and_prints_json(
     tmp_path: Path,
 ) -> None:

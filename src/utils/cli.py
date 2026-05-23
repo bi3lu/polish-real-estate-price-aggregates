@@ -15,6 +15,7 @@ from src.config.globals import (
     DEFAULT_SEARCH_SHARD_STRATEGY,
     DEFAULT_WORKERS,
     ESTATE_TYPES,
+    INGESTION_HARD_MAX_PAGES_PER_RUN,
     MAX_PAGE,
     RESUME_DUPLICATE_PAGE_STOP_THRESHOLD,
     VOIVODESHIPS,
@@ -90,9 +91,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--max-page",
-        type=_positive_int,
+        type=_bounded_positive_page_int,
         default=MAX_PAGE,
-        help=f"Maximum page to process per filter combination. Defaults to {MAX_PAGE}.",
+        help=(
+            "Maximum page to process per filter combination. "
+            f"Defaults to {MAX_PAGE}; hard-capped at "
+            f"{INGESTION_HARD_MAX_PAGES_PER_RUN}."
+        ),
     )
     parser.add_argument(
         "--workers",
@@ -356,6 +361,18 @@ def _positive_int(value: str) -> int:
 
     if parsed_value < 1:
         raise argparse.ArgumentTypeError("value must be greater than or equal to 1")
+
+    return parsed_value
+
+
+def _bounded_positive_page_int(value: str) -> int:
+    parsed_value = _positive_int(value)
+
+    if parsed_value > INGESTION_HARD_MAX_PAGES_PER_RUN:
+        raise argparse.ArgumentTypeError(
+            "value must be lower than or equal to "
+            f"{INGESTION_HARD_MAX_PAGES_PER_RUN}"
+        )
 
     return parsed_value
 

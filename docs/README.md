@@ -19,5 +19,7 @@ runtime flows of the Polish Real Estate Price Aggregates project.
   generated table groups.
 - [Market Ranking CLI](market-ranking.md) - public-dataset ranking commands for
   regional and segment-level market analysis.
+- [Ethics and Responsible Collection](ethics.md) - operational rules for
+  low-impact, non-commercial research ingestion.
 
 GitHub renders Mermaid blocks directly in Markdown files.

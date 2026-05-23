@@ -28,8 +28,9 @@ class SourceDefinition(BaseModel):
     enabled: bool = True
     base_url: str = Field(min_length=1)
     search_url_template: str = Field(min_length=1)
-    rate_limit_seconds: float = Field(default=0.0, ge=0)
-    max_pages_default: int = Field(default=1, ge=1)
+    rate_limit_seconds: float = Field(ge=0)
+    max_pages_default: int = Field(default=3, ge=1)
+    respect_robots_txt: bool = True
     allowed_offer_types: tuple[str, ...] = Field(default_factory=tuple)
     allowed_property_types: tuple[str, ...] = Field(default_factory=tuple)
 

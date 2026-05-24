@@ -10,6 +10,7 @@ flowchart LR
 
     registry[src.ingestion.registry<br/>adapter registry]
     adapters[src.ingestion.adapters.base<br/>SourceAdapter protocol<br/>neutral adapters]
+    sharding[src.ingestion.sharding<br/>canonical SearchShard]
     pipeline[src.ingestion.pipeline<br/>pagination + sharding + workers]
     transport[src.ingestion.transport<br/>HTTP + embedded JSON extraction]
     parsing[src.ingestion.parsing<br/>payload to raw observation]
@@ -34,12 +35,14 @@ flowchart LR
     registry --> source_config
 
     facade --> pipeline
+    pipeline --> sharding
     pipeline --> transport
     pipeline --> parsing
     pipeline --> ingestion_models
     pipeline --> types
     pipeline --> adapters
     adapters --> transport
+    adapters --> sharding
     adapters --> parsing
     adapters --> ingestion_models
     parsing --> ingestion_models
@@ -67,5 +70,5 @@ The ingestion layer is source-neutral. `registry.py` builds adapters from YAML
 config, `adapters/base.py` provides reusable technical adapters, and
 `pipeline.py` handles orchestration without knowing a real source brand.
 
-Downstream ETL consumes `CanonicalListing` records produced from neutral
-`RawListingObservation` inputs.
+Downstream private ETL consumes `CanonicalListing` records produced from neutral
+`RawListingObservation` inputs. Public exports use a separate public schema.

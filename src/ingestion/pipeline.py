@@ -30,6 +30,11 @@ from src.ingestion.parsing import (
     extract_listing_items,
     get_estate_info,
 )
+from src.ingestion.sharding import (
+    SearchShard,
+    build_search_shards,
+    default_shard_query_params,
+)
 from src.ingestion.transport import (
     RequestThrottle,
     build_listing_url,
@@ -43,14 +48,6 @@ SourceInput = SourceDefinition | SourceAdapter | None
 
 
 @dataclass(frozen=True)
-class SearchShard:
-    """Additional source filters used to split large listing searches."""
-
-    key: str
-    query_params: Mapping[str, str]
-
-
-@dataclass(frozen=True)
 class _WorkerFinished:
     """Completion marker emitted by threaded ingestion workers."""
 
@@ -58,92 +55,6 @@ class _WorkerFinished:
     voivodeship: str
     count: int
     error: Exception | None = None
-
-
-_BASE_SEARCH_SHARD = SearchShard(key="base", query_params={})
-_PRICE_SHARDS: tuple[SearchShard, ...] = (
-    SearchShard(
-        key="price-lt-300k",
-        query_params={"search[filter_float_price:to]": "300000"},
-    ),
-    SearchShard(
-        key="price-300k-400k",
-        query_params={
-            "search[filter_float_price:from]": "300000",
-            "search[filter_float_price:to]": "400000",
-        },
-    ),
-    SearchShard(
-        key="price-400k-500k",
-        query_params={
-            "search[filter_float_price:from]": "400000",
-            "search[filter_float_price:to]": "500000",
-        },
-    ),
-    SearchShard(
-        key="price-500k-600k",
-        query_params={
-            "search[filter_float_price:from]": "500000",
-            "search[filter_float_price:to]": "600000",
-        },
-    ),
-    SearchShard(
-        key="price-600k-750k",
-        query_params={
-            "search[filter_float_price:from]": "600000",
-            "search[filter_float_price:to]": "750000",
-        },
-    ),
-    SearchShard(
-        key="price-750k-1000k",
-        query_params={
-            "search[filter_float_price:from]": "750000",
-            "search[filter_float_price:to]": "1000000",
-        },
-    ),
-    SearchShard(
-        key="price-1000k-1500k",
-        query_params={
-            "search[filter_float_price:from]": "1000000",
-            "search[filter_float_price:to]": "1500000",
-        },
-    ),
-    SearchShard(
-        key="price-gte-1500k",
-        query_params={"search[filter_float_price:from]": "1500000"},
-    ),
-)
-_MARKET_SHARDS: tuple[tuple[str, str], ...] = (
-    ("market-primary", "primary"),
-    ("market-secondary", "secondary"),
-)
-
-
-def build_search_shards(strategy: str) -> tuple[SearchShard, ...]:
-    """Build source search shards for large result sets."""
-    if strategy == "none":
-        return (_BASE_SEARCH_SHARD,)
-
-    if strategy == "price":
-        return _PRICE_SHARDS
-
-    if strategy == "market-price":
-        return tuple(
-            SearchShard(
-                key=f"{market_key}__{price_shard.key}",
-                query_params={
-                    "search[filter_enum_market][0]": market_value,
-                    **dict(price_shard.query_params),
-                },
-            )
-            for market_key, market_value in _MARKET_SHARDS
-            for price_shard in _PRICE_SHARDS
-        )
-
-    raise ValueError(
-        "Unsupported search shard strategy: "
-        f"{strategy}. Allowed values: none, price, market-price"
-    )
 
 
 def ingest_estates_for(
@@ -585,6 +496,7 @@ def iter_estates(
 
                 for shard in search_shards:
                     target_key = _source_target_key(source, estate_type, shard)
+                    shard_query_params = _source_shard_query_params(source, shard)
 
                     for estate in iter_estates_for(
                         estate_type,
@@ -599,7 +511,7 @@ def iter_estates(
                             voivodeship=voivodeship,
                         ),
                         duplicate_page_stop_threshold=duplicate_page_stop_threshold,
-                        query_params=shard.query_params,
+                        query_params=shard_query_params,
                         checkpoint_key=target_key,
                         progress_callback=progress_callback,
                         source=source,
@@ -708,6 +620,7 @@ def iter_estates_threaded(
     ) -> int:
         count = 0
         target_key = _source_target_key(source, estate_type, shard)
+        shard_query_params = _source_shard_query_params(source, shard)
 
         try:
             for estate in iter_estates_for(
@@ -727,7 +640,7 @@ def iter_estates_threaded(
                     voivodeship=voivodeship,
                 ),
                 duplicate_page_stop_threshold=duplicate_page_stop_threshold,
-                query_params=shard.query_params,
+                query_params=shard_query_params,
                 checkpoint_key=target_key,
                 progress_callback=progress_callback,
                 source=source,
@@ -927,7 +840,7 @@ def _target_start_page(
 
 
 def _target_key(estate_type: str, shard: SearchShard) -> str:
-    if shard.key == _BASE_SEARCH_SHARD.key:
+    if shard.is_base:
         return estate_type
 
     return f"{estate_type}__{shard.key}"
@@ -973,6 +886,24 @@ def _source_estate_types(
         if estate_type in allowed_property_types
         or source_config.source_property_type(estate_type) in allowed_property_types
     )
+
+
+def _source_shard_query_params(
+    source: SourceInput,
+    shard: SearchShard,
+) -> Mapping[str, str]:
+    if shard.is_base:
+        return {}
+
+    build_query_params = getattr(source, "build_shard_query_params", None)
+
+    if callable(build_query_params):
+        query_params = build_query_params(shard)
+
+        if isinstance(query_params, Mapping):
+            return query_params
+
+    return default_shard_query_params(shard)
 
 
 def _source_id(source: SourceInput) -> str:

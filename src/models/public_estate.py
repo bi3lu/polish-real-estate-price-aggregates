@@ -1,12 +1,43 @@
-"""Public-facing models for anonymized real estate datasets."""
+"""Public-facing models for anonymized real estate datasets.
+
+Public models are a separate contract from private/internal canonical records.
+They must never expose listing identifiers, source identity, URLs, seller
+identity, street-level location, raw coordinates, or image URLs.
+"""
 
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
+FORBIDDEN_PUBLIC_FIELD_NAMES = frozenset(
+    {
+        "source",
+        "source_id",
+        "record_id",
+        "external_id",
+        "url",
+        "title",
+        "location",
+        "street",
+        "district",
+        "address",
+        "latitude",
+        "longitude",
+        "seller_name",
+        "seller_id",
+        "advertiser_type",
+        "user_type",
+        "first_image_url",
+        "image_url",
+        "images",
+        "raw_payload",
+        "attributes",
+    }
+)
+
 
 class PublicListingFeature(BaseModel):
-    """Privacy-preserving listing row for public machine-learning datasets."""
+    """Privacy-preserving public row derived from private listing features."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -52,3 +83,15 @@ class PublicDataQuality(BaseModel):
     value: float
     records_count: int
     processed_at: str
+
+
+def assert_public_schema_safe(model_type: type[BaseModel]) -> None:
+    """Assert that a public model does not expose forbidden private fields."""
+    forbidden_fields = FORBIDDEN_PUBLIC_FIELD_NAMES & set(model_type.model_fields)
+
+    if forbidden_fields:
+        forbidden_text = ", ".join(sorted(forbidden_fields))
+        raise ValueError(
+            f"Public model {model_type.__name__} exposes forbidden field(s): "
+            f"{forbidden_text}"
+        )

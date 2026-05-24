@@ -8,6 +8,7 @@ sequenceDiagram
     participant Config as src.config.source_config
     participant Registry as src.ingestion.registry
     participant Adapter as SourceAdapter
+    participant Sharding as src.ingestion.sharding
     participant Pipeline as src.ingestion.pipeline
     participant Transport as src.ingestion.transport
     participant Parsing as src.ingestion.parsing
@@ -24,9 +25,11 @@ sequenceDiagram
     CLI->>Storage: load existing ids and checkpoints
     Storage-->>CLI: resume metadata
     CLI->>Pipeline: iter_estates(..., sources=adapters)
+    Pipeline->>Sharding: build canonical SearchShard values
 
     loop source x property type x voivodeship x shard x page
         Pipeline->>Adapter: source metadata and config
+        Pipeline->>Adapter: translate canonical shard to query params
         Pipeline->>Transport: fetch listing URL
         Transport->>Source: HTTP request with pacing
         Source-->>Transport: JSON or HTML with embedded state
@@ -67,6 +70,10 @@ Ingestion is resumable:
 
 Each shard has its own checkpoint key, which makes long collection runs easier
 to resume.
+
+Shard definitions are canonical. They carry values such as `price_to=300000` or
+`market=primary`; adapter code translates them to source-specific URL query
+parameters.
 
 ## Source-Specific Behavior Without Brand Classes
 

@@ -1,11 +1,11 @@
 # Polish Real Estate Price Aggregates
 
 [![CI](https://github.com/bi3lu/polish-real-estate-price-aggregates/actions/workflows/ci.yml/badge.svg)](https://github.com/bi3lu/polish-real-estate-price-aggregates/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/bi3lu/polish-real-estate-price-aggregates/branch/main/graph/badge.svg)](https://codecov.io/gh/bi3lu/polish-real-estate-price-aggregates)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Type Checked](https://img.shields.io/badge/type%20checked-mypy-blue)
 ![Code Style](https://img.shields.io/badge/code%20style-black-000000)
 ![Linting](https://img.shields.io/badge/linting-ruff-orange)
-[![Coverage](assets/coverage.svg)](assets/coverage.svg)
 
 Python data pipeline for collecting, normalizing, aggregating, and publishing
 analysis-ready Polish residential real estate listing data.

@@ -11,17 +11,20 @@ from pathlib import Path
 from threading import Lock
 from typing import TextIO
 
-from src.config.env import get_required_env_file_value
 from src.config.globals import (
     DEFAULT_SEARCH_SHARD_STRATEGY,
     DEFAULT_WORKERS,
     ESTATE_TYPES,
+    INGESTION_HARD_MAX_PAGES_PER_RUN,
     MAX_PAGE,
     RESUME_DUPLICATE_PAGE_STOP_THRESHOLD,
     VOIVODESHIPS,
 )
+from src.config.source_config import load_source_config
+from src.ingestion.adapters.base import PaginatedListingSourceAdapter, SourceAdapter
 from src.ingestion.estate_ingestion import iter_estates
-from src.models.estate import Estate
+from src.ingestion.models import RawListingObservation
+from src.ingestion.registry import build_adapters
 from src.utils.logger import get_logger
 from src.utils.storage import (
     load_bronze_external_ids_by_voivodeship,
@@ -44,9 +47,10 @@ class CliOptions:
     ignore_checkpoints: bool
     duplicate_page_stop_threshold: int
     search_shard_strategy: str
+    source_config_path: Path | None = None
 
 
-IngestFn = Callable[..., Iterable[Estate]]
+IngestFn = Callable[..., Iterable[RawListingObservation]]
 SaveFn = Callable[..., tuple[Path, int]]
 ValidateFn = Callable[[], None]
 ExistingIdsLoaderFn = Callable[[], dict[str, set[str]]]
@@ -87,9 +91,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--max-page",
-        type=_positive_int,
+        type=_bounded_positive_page_int,
         default=MAX_PAGE,
-        help=f"Maximum page to process per filter combination. Defaults to {MAX_PAGE}.",
+        help=(
+            "Maximum page to process per filter combination. "
+            f"Defaults to {MAX_PAGE}; hard-capped at "
+            f"{INGESTION_HARD_MAX_PAGES_PER_RUN}."
+        ),
     )
     parser.add_argument(
         "--workers",
@@ -134,6 +142,15 @@ def build_parser() -> argparse.ArgumentParser:
             f"Defaults to {DEFAULT_SEARCH_SHARD_STRATEGY}."
         ),
     )
+    parser.add_argument(
+        "--source-config",
+        type=Path,
+        default=None,
+        help=(
+            "Path to a source YAML config. Defaults to config/sources.local.yaml "
+            "when present, otherwise config/sources.example.yaml."
+        ),
+    )
 
     return parser
 
@@ -169,6 +186,7 @@ def parse_cli_args(args: Sequence[str] | None = None) -> CliOptions:
             ignore_checkpoints=namespace.ignore_checkpoints,
             duplicate_page_stop_threshold=namespace.duplicate_page_stop_threshold,
             search_shard_strategy=namespace.shard_strategy,
+            source_config_path=namespace.source_config,
         )
 
     except argparse.ArgumentTypeError as exc:
@@ -176,9 +194,8 @@ def parse_cli_args(args: Sequence[str] | None = None) -> CliOptions:
 
 
 def _validate_required_runtime_env() -> None:
-    """Validate that runtime-only URL configuration is present."""
-    get_required_env_file_value("MAIN_URL")
-    get_required_env_file_value("ESTATE_URL")
+    """Compatibility no-op for callers that still inject a validator."""
+    return None
 
 
 def run_cli(
@@ -207,6 +224,13 @@ def run_cli(
     """
     validator()
     options = parse_cli_args(args)
+    source_config = load_source_config(options.source_config_path)
+    adapters = build_adapters(
+        source_config,
+        property_types=options.estate_types,
+        voivodeships=options.voivodeships,
+        max_pages=options.max_page,
+    )
     logger.info(
         "CLI run started: estate_types=%s voivodeships=%s max_page=%s workers=%s",
         ", ".join(options.estate_types),
@@ -253,6 +277,7 @@ def run_cli(
         duplicate_page_stop_threshold=options.duplicate_page_stop_threshold,
         search_shard_strategy=options.search_shard_strategy,
         progress_callback=progress_callback,
+        sources=adapters,
     )
     output_path, count = saver(
         estates,
@@ -260,6 +285,7 @@ def run_cli(
         voivodeships=options.voivodeships,
         max_page=options.max_page,
         page_checkpoints_by_voivodeship=page_checkpoints_by_voivodeship,
+        adapter_types_by_source_id=_adapter_types_by_source_id(adapters),
     )
     logger.info("Bronze snapshot saved to %s with %s records", output_path, count)
     json.dump(
@@ -272,6 +298,7 @@ def run_cli(
             "ignore_checkpoints": options.ignore_checkpoints,
             "duplicate_page_stop_threshold": options.duplicate_page_stop_threshold,
             "search_shard_strategy": options.search_shard_strategy,
+            "source_ids": [adapter.source_id for adapter in adapters],
         },
         stdout,
         ensure_ascii=False,
@@ -280,6 +307,16 @@ def run_cli(
     stdout.write("\n")
 
     return 0
+
+
+def _adapter_types_by_source_id(
+    adapters: Iterable[SourceAdapter],
+) -> dict[str, str]:
+    return {
+        adapter.source_id: adapter.config.adapter_type
+        for adapter in adapters
+        if isinstance(adapter, PaginatedListingSourceAdapter)
+    }
 
 
 def _resolve_values(
@@ -324,6 +361,18 @@ def _positive_int(value: str) -> int:
 
     if parsed_value < 1:
         raise argparse.ArgumentTypeError("value must be greater than or equal to 1")
+
+    return parsed_value
+
+
+def _bounded_positive_page_int(value: str) -> int:
+    parsed_value = _positive_int(value)
+
+    if parsed_value > INGESTION_HARD_MAX_PAGES_PER_RUN:
+        raise argparse.ArgumentTypeError(
+            "value must be lower than or equal to "
+            f"{INGESTION_HARD_MAX_PAGES_PER_RUN}"
+        )
 
     return parsed_value
 

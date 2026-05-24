@@ -6,13 +6,13 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.config.env import PROJECT_ROOT, get_env_file_value
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 #######################################################################################
 # Estate globals:
 #######################################################################################
 
-SERVICE_SOURCE: str = get_env_file_value("SERVICE_SOURCE", "estate_service")
+DEFAULT_SOURCE_ID: str = "source_a"
 
 #######################################################################################
 # Estate normalization maps:
@@ -98,14 +98,15 @@ ADDITIONAL_FEATURES: frozenset[str] = frozenset(
 # HTTP globals:
 #######################################################################################
 
-MAIN_URL: str = get_env_file_value("MAIN_URL", "https://example.invalid/results/")
-ESTATE_URL: str = get_env_file_value("ESTATE_URL", "https://example.invalid/estate/")
+MAIN_URL: str = "https://example-listing-site.local/search"
+ESTATE_URL: str = "https://example-listing-site.local"
 
 #######################################################################################
 # Ingestion pagination and resume limits:
 #######################################################################################
 
-MAX_PAGE: int = 1001
+MAX_PAGE: int = 3
+INGESTION_HARD_MAX_PAGES_PER_RUN: int = 50
 RESUME_DUPLICATE_PAGE_STOP_THRESHOLD = 0
 DEFAULT_SEARCH_SHARD_STRATEGY = "market-price"
 
@@ -116,6 +117,8 @@ DEFAULT_SEARCH_SHARD_STRATEGY = "market-price"
 REQUEST_TIMEOUT_SECONDS: int = 30
 REQUEST_RETRIES: int = 3
 REQUEST_RETRY_SLEEP_SECONDS: float = 1.0
+REQUEST_RETRY_BACKOFF_MULTIPLIER: float = 2.0
+REQUEST_RETRY_MAX_SLEEP_SECONDS: float = 30.0
 REQUEST_BLOCK_STATUS_CODES: frozenset[int] = frozenset({403, 429})
 REQUEST_BLOCK_RETRIES: int = 96
 REQUEST_BLOCK_COOLDOWN_SECONDS: float = 300.0
@@ -129,7 +132,8 @@ REQUEST_BLOCK_JITTER_SECONDS: float = 30.0
 
 HEADERS: dict[str, str] = {
     "User-Agent": (
-        "Mozilla/5.0 (X11; Linux x86_64; rv:126.0) " "Gecko/20100101 Firefox/126.0"
+        "PolishRealEstateResearchBot/1.0 "
+        "(non-commercial research; +https://github.com/bi3lu/polish-real-estate-price-aggregates)"
     ),
     "Accept": (
         "text/html,application/xhtml+xml,application/xml;q=0.9,"

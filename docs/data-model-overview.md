@@ -2,82 +2,85 @@
 
 ```mermaid
 classDiagram
-    class Estate {
-        source: str
+    class RawListingObservation {
+        source_id: str
         external_id: str
         url: str?
         title: str?
+        estate_type: str?
+        voivodeship: str?
         price: float?
+        price_per_sqm: float?
         area_sqm: float?
         rooms: int?
+        location: str?
         attributes: dict
     }
 
-    class SilverEstate {
+    class CanonicalListing {
         record_id: str
-        source: str
+        source_id: str
         external_id: str
         price_pln: float?
         price_per_sqm_pln: float?
-        location_fields: str?
-        normalized_attributes: dict
+        area_sqm: float?
+        normalized_location: str?
+        image_count: int
+        quality_flags: bool
         processed_at: str
+    }
+
+    class SourceRun {
+        run_id: str
+        source_id: str
+        adapter_type: str
+        started_at: datetime
+        finished_at: datetime?
+        stats: SourceRunStats
+        quality: SourceQualityStats
+    }
+
+    class SourceRunStats {
+        pages_requested: int
+        records_seen: int
+        records_written: int
+        duplicates_skipped: int
+        errors_count: int
+    }
+
+    class SourceQualityStats {
+        records_count: int
+        records_with_price: int
+        records_with_location: int
+        records_with_coordinates: int
     }
 
     class GoldListingFeature {
         record_id: str
-        feature_buckets: str?
-        amenity_count: int
+        bucketed_features: str?
+        amenity_flags: bool
         geo_precision: str
         ml_targets: float?
-        processed_at: str
-    }
-
-    class GoldGeoAggregate {
-        geo_id: str
-        location_grain: str
-        price_statistics: float
-        coordinate_coverage: float
-        processed_at: str
-    }
-
-    class GoldSegmentAggregate {
-        segment_id: str
-        segment_grain: str
-        price_statistics: float
-        amenity_shares: float
-        processed_at: str
-    }
-
-    class GoldDataQuality {
-        metric: str
-        value: float
-        records_count: int
-        processed_at: str
     }
 
     class PublicListingFeature {
-        generalized_location: str?
+        public_location: str?
         bucketed_attributes: str?
-        rounded_public_targets: float?
-        processed_at: str
+        rounded_targets: float?
+        no_direct_identifiers: bool
     }
 
-    class PublicDataQuality {
-        metric: str
-        value: float
-        records_count: int
-        processed_at: str
-    }
-
-    Estate --> SilverEstate : normalize
-    SilverEstate --> GoldListingFeature : feature engineering
-    GoldListingFeature --> GoldGeoAggregate : aggregate by geo
-    GoldListingFeature --> GoldSegmentAggregate : aggregate by segment
-    GoldListingFeature --> GoldDataQuality : measure quality
+    RawListingObservation --> CanonicalListing : normalize in silver
+    SourceRun --> SourceRunStats
+    SourceRun --> SourceQualityStats
+    CanonicalListing --> GoldListingFeature : feature engineering
     GoldListingFeature --> PublicListingFeature : anonymize
-    PublicListingFeature --> PublicDataQuality : measure public export
 ```
 
-The public model intentionally omits direct listing identifiers, URLs, seller
-identifiers, street-level information, raw coordinates, and image URLs.
+Domain ingestion models live in `src/ingestion/models.py` and use neutral names.
+They do not contain source-branded model names. Every record carries
+`source_id`, but that id can be opaque and does not need to reveal the real
+source.
+
+`CanonicalListing` is the contract for silver and downstream ETL. Gold and
+public layers should not depend on raw source payload shapes.

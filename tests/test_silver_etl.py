@@ -15,21 +15,21 @@ from src.etl.silver import (
     run_bronze_to_silver,
     transform_bronze_payload,
 )
-from src.models.estate import Estate
+from src.ingestion.models import RawListingObservation
 
 
 def test_normalize_estate_returns_flat_silver_record() -> None:
     silver_estate = normalize_estate(
-        Estate(
-            source="Estate Service",
+        RawListingObservation(
+            source_id="Source A",
             external_id=" 123 ",
             url=" https://example.invalid/offer ",
-            title="  Duże   mieszkanie  ",
+            title="  Synthetic   Silver Listing  ",
             estate_type="Mieszkanie",
             voivodeship="Mazowieckie",
-            city=" Warszawa ",
-            district=" Mokotów ",
-            street=" Puławska ",
+            city=" Example City ",
+            district=" Example District ",
+            street=" Example Street ",
             price=750000,
             price_per_sqm=15000,
             area_sqm=50,
@@ -37,7 +37,7 @@ def test_normalize_estate_returns_flat_silver_record() -> None:
             floor=2,
             market="SECONDARY",
             building_type="BLOCK",
-            seller_name=" Biuro Testowe ",
+            seller_name=" Synthetic Seller ",
             seller_type="AGENCY",
             latitude=52.1,
             longitude=21.2,
@@ -78,12 +78,12 @@ def test_normalize_estate_returns_flat_silver_record() -> None:
     )
 
     assert silver_estate is not None
-    assert silver_estate.record_id == "estate_service:123"
-    assert silver_estate.source == "estate_service"
-    assert silver_estate.title == "Duże mieszkanie"
+    assert silver_estate.record_id == "source_a:123"
+    assert silver_estate.source_id == "source_a"
+    assert silver_estate.title == "Synthetic Silver Listing"
     assert silver_estate.estate_type == "mieszkanie"
     assert silver_estate.voivodeship == "mazowieckie"
-    assert silver_estate.location == "Puławska, Mokotów, Warszawa"
+    assert silver_estate.location == "Example Street, Example District, Example City"
     assert silver_estate.price_pln == 750000
     assert silver_estate.price_per_sqm_pln == 15000
     assert silver_estate.rent_pln == 850
@@ -127,12 +127,12 @@ def test_transform_bronze_payload_skips_invalid_items_and_deduplicates() -> None
             "scraped_at": "2026-05-15T12:00:00+00:00",
             "data": [
                 {
-                    "source": "estate_service",
+                    "source_id": "source_a",
                     "external_id": "same-id",
                     "title": "Older title",
                 },
                 {
-                    "source": "estate_service",
+                    "source_id": "source_a",
                     "external_id": "same-id",
                     "title": "Newer title",
                     "price": 100,
@@ -144,7 +144,7 @@ def test_transform_bronze_payload_skips_invalid_items_and_deduplicates() -> None
     )
 
     assert len(records) == 1
-    assert records[0].record_id == "estate_service:same-id"
+    assert records[0].record_id == "source_a:same-id"
     assert records[0].title == "Newer title"
     assert records[0].price_pln == 100
     assert records[0].bronze_scraped_at == "2026-05-15T12:00:00+00:00"
@@ -177,9 +177,9 @@ def test_load_bronze_snapshot_supports_streaming_jsonl(tmp_path: Path) -> None:
                     {
                         "record_type": "estate",
                         "data": {
-                            "source": "estate_service",
+                            "source_id": "source_a",
                             "external_id": "listing-1",
-                            "title": "Oferta",
+                            "title": "Synthetic Snapshot Listing",
                         },
                     }
                 ),
@@ -208,7 +208,7 @@ def test_load_bronze_snapshot_supports_voivodeship_manifest(tmp_path: Path) -> N
                     {
                         "record_type": "estate",
                         "data": {
-                            "source": "estate_service",
+                            "source_id": "source_a",
                             "external_id": "listing-1",
                             "voivodeship": "mazowieckie",
                         },
@@ -254,7 +254,7 @@ def test_load_bronze_directory_snapshot_reads_all_voivodeship_files(
                 {
                     "record_type": "estate",
                     "data": {
-                        "source": "estate_service",
+                        "source_id": "source_a",
                         "external_id": external_id,
                         "voivodeship": voivodeship,
                     },
@@ -306,9 +306,9 @@ def test_run_bronze_to_silver_writes_normalized_csv(tmp_path: Path) -> None:
                 "count": 1,
                 "data": [
                     {
-                        "source": "estate_service",
+                        "source_id": "source_a",
                         "external_id": "listing-1",
-                        "title": "Oferta",
+                        "title": "Synthetic Bronze Listing",
                         "price": 500000,
                     }
                 ],
@@ -329,8 +329,23 @@ def test_run_bronze_to_silver_writes_normalized_csv(tmp_path: Path) -> None:
         rows = list(csv.DictReader(output_file))
 
     assert len(rows) == 1
-    assert rows[0]["record_id"] == "estate_service:listing-1"
+    assert rows[0]["record_id"] == "source_a:listing-1"
     assert rows[0]["price_pln"] == "500000.0"
     assert rows[0]["has_price"] == "true"
     assert rows[0]["processed_at"] == "2026-05-15T13:00:00+00:00"
     assert rows[0]["bronze_scraped_at"] == "2026-05-15T12:00:00+00:00"
+
+    partition_path = (
+        silver_dir
+        / "canonical_listings"
+        / "source_id=source_a"
+        / "month=2026-05"
+        / "listings.jsonl"
+    )
+    partition_rows = [
+        json.loads(line)
+        for line in partition_path.read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert partition_rows[0]["record_id"] == "source_a:listing-1"
+    assert partition_rows[0]["source_id"] == "source_a"

@@ -12,23 +12,34 @@ from typing import Any
 from _thread import LockType
 
 from src.config.globals import (
+    DEFAULT_SOURCE_ID,
     ESTATE_TYPES,
+    ESTATE_URL,
+    INGESTION_HARD_MAX_PAGES_PER_RUN,
     MAX_PAGE,
     RESUME_DUPLICATE_PAGE_STOP_THRESHOLD,
     VOIVODESHIPS,
 )
+from src.config.source_config import SourceDefinition
 from src.config.types import IngestionProgressCallback, SearchShardStrategy
+from src.ingestion.adapters.base import SourceAdapter
+from src.ingestion.models import CanonicalListing, RawListingObservation
 from src.ingestion.parsing import (
     enrich_listing_item,
     extract_listing_external_id,
     extract_listing_items,
     get_estate_info,
 )
-from src.ingestion.transport import build_listing_url, fetch_next_data_json
-from src.models.estate import Estate
+from src.ingestion.transport import (
+    RequestThrottle,
+    build_listing_url,
+    fetch_next_data_json,
+)
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+SourceInput = SourceDefinition | SourceAdapter | None
 
 
 @dataclass(frozen=True)
@@ -148,7 +159,8 @@ def ingest_estates_for(
     query_params: Mapping[str, str] | None = None,
     checkpoint_key: str | None = None,
     progress_callback: IngestionProgressCallback | None = None,
-) -> list[Estate]:
+    source: SourceInput = None,
+) -> list[RawListingObservation]:
     """Ingest listings for a single estate type and voivodeship.
 
     Args:
@@ -181,6 +193,7 @@ def ingest_estates_for(
             query_params=query_params,
             checkpoint_key=checkpoint_key,
             progress_callback=progress_callback,
+            source=source,
         )
     )
 
@@ -198,7 +211,8 @@ def iter_estates_for(
     query_params: Mapping[str, str] | None = None,
     checkpoint_key: str | None = None,
     progress_callback: IngestionProgressCallback | None = None,
-) -> Iterable[Estate]:
+    source: SourceInput = None,
+) -> Iterable[RawListingObservation]:
     """Yield listings for a single estate type and voivodeship.
 
     Args:
@@ -216,7 +230,7 @@ def iter_estates_for(
         progress_callback: Optional callback invoked after each completed page.
 
     Yields:
-        Estate records discovered on listing pages.
+        Raw listing observations discovered on listing pages.
 
     Raises:
         ValueError: If filters or ``start_page`` are invalid.
@@ -235,6 +249,9 @@ def iter_estates_for(
             "duplicate_page_stop_threshold must be greater than or equal to 0"
         )
 
+    if max_page < 1:
+        raise ValueError("max_page must be greater than or equal to 1")
+
     total_estates_count = 0
     seen_external_ids: set[str] = {
         str(external_id) for external_id in existing_external_ids
@@ -243,24 +260,58 @@ def iter_estates_for(
     duplicate_only_page_count = 0
     seen_page_signatures: set[tuple[str, ...]] = set()
     target_key = checkpoint_key or estate_type
+    source_config = _source_config(source)
+    source_id = _source_id(source)
+    effective_max_page = _effective_max_page(max_page, source_config)
+    detail_base_url = (
+        source_config.base_url if source_config is not None else ESTATE_URL
+    )
+    source_throttle = (
+        RequestThrottle(rate_limit_seconds=source_config.rate_limit_seconds)
+        if source_config is not None
+        else None
+    )
+
+    def fetch_listing_payload(url: str) -> Mapping[str, Any]:
+        if source_throttle is None or fetcher is not fetch_next_data_json:
+            return fetcher(url)
+
+        return fetch_next_data_json(
+            url,
+            throttle=source_throttle,
+            allow_missing_next_data=_allow_missing_next_data(source_config),
+        )
+
+    def fetch_detail_payload(url: str) -> Mapping[str, Any]:
+        if detail_fetcher is None:
+            raise RuntimeError("detail fetcher is disabled")
+
+        if source_throttle is None or detail_fetcher is not fetch_next_data_json:
+            return detail_fetcher(url)
+
+        return fetch_next_data_json(url, throttle=source_throttle)
+
     logger.info(
         "Streaming ingestion started for estate_type=%s voivodeship=%s target=%s "
-        "max_page=%s start_page=%s existing_ids=%s query_params=%s",
+        "requested_max_page=%s effective_max_page=%s start_page=%s "
+        "existing_ids=%s query_params=%s",
         estate_type,
         voivodeship,
         target_key,
         max_page,
+        effective_max_page,
         start_page,
         existing_external_ids_count,
         dict(query_params or {}),
     )
 
-    for page in range(start_page, max_page + 1):
+    for page in range(start_page, effective_max_page + 1):
         listing_url = build_listing_url(
             estate_type,
             voivodeship,
             page=page,
             query_params=query_params,
+            source=source_config,
         )
         logger.info(
             "Fetching listing page %s for estate_type=%s voivodeship=%s target=%s",
@@ -269,7 +320,7 @@ def iter_estates_for(
             voivodeship,
             target_key,
         )
-        next_data_json = fetcher(listing_url)
+        next_data_json = fetch_listing_payload(listing_url)
         listing_items = extract_listing_items(next_data_json)
 
         if not listing_items:
@@ -313,6 +364,12 @@ def iter_estates_for(
 
             if (
                 listing_external_id is not None
+                and f"{source_id}:{listing_external_id}" in seen_external_ids
+            ):
+                page_duplicate_count += 1
+                continue
+            if (
+                listing_external_id is not None
                 and listing_external_id in seen_external_ids
             ):
                 page_duplicate_count += 1
@@ -320,12 +377,22 @@ def iter_estates_for(
 
             enriched_item = enrich_listing_item(
                 listing_item,
-                detail_fetcher=detail_fetcher,
+                detail_fetcher=(
+                    fetch_detail_payload
+                    if (
+                        detail_fetcher is not None
+                        and _fetch_details_for_source(source_config)
+                    )
+                    else None
+                ),
+                detail_base_url=detail_base_url,
             )
             estate = get_estate_info(
                 enriched_item,
                 estate_type=estate_type,
                 voivodeship=voivodeship,
+                source_id=source_id,
+                detail_base_url=detail_base_url,
             )
 
             if estate is None:
@@ -338,11 +405,16 @@ def iter_estates_for(
                 )
                 continue
 
-            if estate.external_id in seen_external_ids:
+            estate_dedupe_key = _listing_dedupe_key(estate)
+
+            if (
+                estate_dedupe_key in seen_external_ids
+                or estate.external_id in seen_external_ids
+            ):
                 page_duplicate_count += 1
                 continue
 
-            seen_external_ids.add(estate.external_id)
+            seen_external_ids.add(estate_dedupe_key)
             page_estates_count += 1
             total_estates_count += 1
             yield estate
@@ -445,7 +517,8 @@ def iter_estates(
     duplicate_page_stop_threshold: int = RESUME_DUPLICATE_PAGE_STOP_THRESHOLD,
     search_shard_strategy: SearchShardStrategy = "none",
     progress_callback: IngestionProgressCallback | None = None,
-) -> Iterable[Estate]:
+    sources: Iterable[SourceInput] | None = None,
+) -> Iterable[RawListingObservation]:
     """Yield listings for all requested estate type and voivodeship combinations.
 
     Args:
@@ -464,9 +537,10 @@ def iter_estates(
         progress_callback: Optional callback invoked after each completed page.
 
     Yields:
-        Estate records for all requested targets.
+        Raw listing observations for all requested targets.
     """
     search_shards = build_search_shards(search_shard_strategy)
+    selected_sources = _resolve_sources(sources)
 
     if workers > 1:
         yield from iter_estates_threaded(
@@ -481,6 +555,7 @@ def iter_estates(
             duplicate_page_stop_threshold=duplicate_page_stop_threshold,
             search_shard_strategy=search_shard_strategy,
             progress_callback=progress_callback,
+            sources=selected_sources,
         )
         return
 
@@ -493,8 +568,9 @@ def iter_estates(
     total_estates_count = 0
 
     logger.info(
-        "Streaming ingestion started for estate_types=%s voivodeships=%s max_page=%s "
-        "shard_strategy=%s shards=%s",
+        "Streaming ingestion started for sources=%s estate_types=%s voivodeships=%s "
+        "max_page=%s shard_strategy=%s shards=%s",
+        ", ".join(_source_id(source) for source in selected_sources),
         ", ".join(selected_estate_types),
         ", ".join(selected_voivodeships),
         max_page,
@@ -502,36 +578,40 @@ def iter_estates(
         len(search_shards),
     )
 
-    for estate_type in selected_estate_types:
-        for voivodeship in selected_voivodeships:
-            seen_ids = seen_ids_by_voivodeship.setdefault(voivodeship, set())
+    for source in selected_sources:
+        for estate_type in _source_estate_types(source, selected_estate_types):
+            for voivodeship in selected_voivodeships:
+                seen_ids = seen_ids_by_voivodeship.setdefault(voivodeship, set())
 
-            for shard in search_shards:
-                target_key = _target_key(estate_type, shard)
+                for shard in search_shards:
+                    target_key = _source_target_key(source, estate_type, shard)
 
-                for estate in iter_estates_for(
-                    estate_type,
-                    voivodeship,
-                    max_page=max_page,
-                    fetcher=fetcher,
-                    detail_fetcher=detail_fetcher,
-                    existing_external_ids=seen_ids,
-                    start_page=_target_start_page(
-                        start_pages_by_target,
-                        estate_type=target_key,
-                        voivodeship=voivodeship,
-                    ),
-                    duplicate_page_stop_threshold=duplicate_page_stop_threshold,
-                    query_params=shard.query_params,
-                    checkpoint_key=target_key,
-                    progress_callback=progress_callback,
-                ):
-                    if estate.external_id in seen_ids:
-                        continue
+                    for estate in iter_estates_for(
+                        estate_type,
+                        voivodeship,
+                        max_page=max_page,
+                        fetcher=fetcher,
+                        detail_fetcher=detail_fetcher,
+                        existing_external_ids=seen_ids,
+                        start_page=_target_start_page(
+                            start_pages_by_target,
+                            estate_type=target_key,
+                            voivodeship=voivodeship,
+                        ),
+                        duplicate_page_stop_threshold=duplicate_page_stop_threshold,
+                        query_params=shard.query_params,
+                        checkpoint_key=target_key,
+                        progress_callback=progress_callback,
+                        source=source,
+                    ):
+                        dedupe_key = _listing_dedupe_key(estate)
 
-                    seen_ids.add(estate.external_id)
-                    total_estates_count += 1
-                    yield estate
+                        if dedupe_key in seen_ids:
+                            continue
+
+                        seen_ids.add(dedupe_key)
+                        total_estates_count += 1
+                        yield estate
 
     logger.info(
         "Streaming ingestion finished for all filters total=%s", total_estates_count
@@ -551,7 +631,8 @@ def iter_estates_threaded(
     duplicate_page_stop_threshold: int = RESUME_DUPLICATE_PAGE_STOP_THRESHOLD,
     search_shard_strategy: SearchShardStrategy = "none",
     progress_callback: IngestionProgressCallback | None = None,
-) -> Iterable[Estate]:
+    sources: Iterable[SourceInput] | None = None,
+) -> Iterable[RawListingObservation]:
     """Yield listings using worker threads split by filter combinations.
 
     Args:
@@ -570,7 +651,7 @@ def iter_estates_threaded(
         progress_callback: Optional callback invoked after each completed page.
 
     Yields:
-        Estate records emitted by worker threads.
+        Raw listing observations emitted by worker threads.
 
     Raises:
         ValueError: If ``workers`` is lower than one.
@@ -581,10 +662,12 @@ def iter_estates_threaded(
 
     selected_estate_types = tuple(sorted(estate_types))
     selected_voivodeships = tuple(sorted(voivodeships))
+    selected_sources = _resolve_sources(sources)
     search_shards = build_search_shards(search_shard_strategy)
     ingestion_targets = tuple(
-        (estate_type, voivodeship, shard)
-        for estate_type in selected_estate_types
+        (source, estate_type, voivodeship, shard)
+        for source in selected_sources
+        for estate_type in _source_estate_types(source, selected_estate_types)
         for voivodeship in selected_voivodeships
         for shard in search_shards
     )
@@ -598,14 +681,16 @@ def iter_estates_threaded(
     )
     seen_ids_lock = Lock()
     max_workers = min(workers, len(ingestion_targets))
-    output_queue: queue.Queue[Estate | _WorkerFinished] = queue.Queue(
+    output_queue: queue.Queue[RawListingObservation | _WorkerFinished] = queue.Queue(
         maxsize=max_workers * 100
     )
     total_estates_count = 0
 
     logger.info(
-        "Threaded streaming ingestion started: estate_types=%s voivodeships=%s "
-        "max_page=%s workers=%s active_workers=%s shard_strategy=%s shards=%s",
+        "Threaded streaming ingestion started: sources=%s estate_types=%s "
+        "voivodeships=%s max_page=%s workers=%s active_workers=%s "
+        "shard_strategy=%s shards=%s",
+        ", ".join(_source_id(source) for source in selected_sources),
         ", ".join(selected_estate_types),
         ", ".join(selected_voivodeships),
         max_page,
@@ -616,12 +701,13 @@ def iter_estates_threaded(
     )
 
     def ingest_target(
+        source: SourceInput,
         estate_type: str,
         voivodeship: str,
         shard: SearchShard,
     ) -> int:
         count = 0
-        target_key = _target_key(estate_type, shard)
+        target_key = _source_target_key(source, estate_type, shard)
 
         try:
             for estate in iter_estates_for(
@@ -644,12 +730,13 @@ def iter_estates_threaded(
                 query_params=shard.query_params,
                 checkpoint_key=target_key,
                 progress_callback=progress_callback,
+                source=source,
             ):
                 if not _remember_seen_id(
                     seen_ids_by_voivodeship,
                     seen_ids_lock,
                     voivodeship,
-                    estate.external_id,
+                    _listing_dedupe_key(estate),
                 ):
                     continue
 
@@ -681,8 +768,8 @@ def iter_estates_threaded(
         thread_name_prefix="estate-ingestion",
     ) as executor:
         futures = [
-            executor.submit(ingest_target, estate_type, voivodeship, shard)
-            for estate_type, voivodeship, shard in ingestion_targets
+            executor.submit(ingest_target, source, estate_type, voivodeship, shard)
+            for source, estate_type, voivodeship, shard in ingestion_targets
         ]
         remaining_targets = len(futures)
 
@@ -749,7 +836,8 @@ def ingest_estates(
     duplicate_page_stop_threshold: int = RESUME_DUPLICATE_PAGE_STOP_THRESHOLD,
     search_shard_strategy: SearchShardStrategy = "none",
     progress_callback: IngestionProgressCallback | None = None,
-) -> list[Estate]:
+    sources: Iterable[SourceInput] | None = None,
+) -> list[RawListingObservation]:
     """Ingest listings for all requested estate type and voivodeship combinations.
 
     Args:
@@ -794,12 +882,31 @@ def ingest_estates(
             duplicate_page_stop_threshold=duplicate_page_stop_threshold,
             search_shard_strategy=search_shard_strategy,
             progress_callback=progress_callback,
+            sources=sources,
         )
     )
 
     logger.info("Ingestion finished for all filters total=%s", len(estates))
 
     return estates
+
+
+def iter_canonical_listings(
+    adapters: Iterable[SourceAdapter],
+) -> Iterable[CanonicalListing]:
+    """Yield canonical listings from neutral source adapters."""
+    for adapter in adapters:
+        for url in adapter.build_search_urls():
+            payload = adapter.fetch(url)
+            observations = adapter.parse(payload)
+            yield from adapter.normalize(observations)
+
+
+def ingest_canonical_listings(
+    adapters: Iterable[SourceAdapter],
+) -> list[CanonicalListing]:
+    """Run neutral source adapters and collect canonical listings."""
+    return list(iter_canonical_listings(adapters))
 
 
 def _target_start_page(
@@ -824,6 +931,96 @@ def _target_key(estate_type: str, shard: SearchShard) -> str:
         return estate_type
 
     return f"{estate_type}__{shard.key}"
+
+
+def _source_target_key(
+    source: SourceInput,
+    estate_type: str,
+    shard: SearchShard,
+) -> str:
+    target = estate_type if source is None else f"{source.source_id}__{estate_type}"
+    return _target_key(target, shard)
+
+
+def _resolve_sources(
+    sources: Iterable[SourceInput] | None,
+) -> tuple[SourceInput, ...]:
+    if sources is None:
+        return (None,)
+
+    return tuple(
+        source
+        for source in sources
+        if source is None or getattr(source, "enabled", True)
+    )
+
+
+def _source_estate_types(
+    source: SourceInput,
+    estate_types: Iterable[str],
+) -> tuple[str, ...]:
+    selected_estate_types = tuple(estate_types)
+    source_config = _source_config(source)
+
+    if source_config is None or not source_config.allowed_property_types:
+        return selected_estate_types
+
+    allowed_property_types = set(source_config.allowed_property_types)
+
+    return tuple(
+        estate_type
+        for estate_type in selected_estate_types
+        if estate_type in allowed_property_types
+        or source_config.source_property_type(estate_type) in allowed_property_types
+    )
+
+
+def _source_id(source: SourceInput) -> str:
+    if source is None:
+        return DEFAULT_SOURCE_ID
+
+    return source.source_id
+
+
+def _source_config(source: SourceInput) -> SourceDefinition | None:
+    if source is None:
+        return None
+
+    if isinstance(source, SourceDefinition):
+        return source
+
+    config = getattr(source, "config", None)
+
+    if isinstance(config, SourceDefinition):
+        return config
+
+    return None
+
+
+def _effective_max_page(
+    requested_max_page: int,
+    source_config: SourceDefinition | None,
+) -> int:
+    limits = [requested_max_page, INGESTION_HARD_MAX_PAGES_PER_RUN]
+
+    if source_config is not None:
+        limits.append(source_config.max_pages_default)
+
+    return min(limits)
+
+
+def _allow_missing_next_data(source_config: SourceDefinition | None) -> bool:
+    return (
+        source_config is not None and source_config.adapter_type == "html_listing_site"
+    )
+
+
+def _fetch_details_for_source(source_config: SourceDefinition | None) -> bool:
+    return source_config is None or source_config.adapter_type != "html_listing_site"
+
+
+def _listing_dedupe_key(listing: RawListingObservation) -> str:
+    return f"{listing.source_id}:{listing.external_id}"
 
 
 def _listing_page_signature(

@@ -1,0 +1,41 @@
+services:
+  ingestion:
+    build:
+      context: .
+    image: polish-real-estate-price-aggregates:local
+    command: ["/app/docker/ingestion-loop.sh"]
+    init: true
+    restart: unless-stopped
+    environment:
+      SOURCE_CONFIG: /app/config/sources.local.yaml
+      INGESTION_INTERVAL_SECONDS: "3600"
+      INGESTION_ON_START: "true"
+      INGESTION_ARGS: "--workers 6"
+      RUN_SILVER_ETL: "true"
+      RUN_GOLD_ETL: "false"
+      RUN_PUBLIC_ETL: "false"
+      MAX_FAILURES_BEFORE_EXIT: "0"
+    volumes:
+      - ./config:/app/config:ro
+      - ./data:/app/data
+    stop_grace_period: 60s
+
+  ingestion-once:
+    profiles: ["manual"]
+    build:
+      context: .
+    image: polish-real-estate-price-aggregates:local
+    command:
+      - python
+      - main.py
+      - --source-config
+      - /app/config/sources.local.yaml
+      - --max-page
+      - "1"
+      - --workers
+      - "1"
+      - --pretty
+    init: true
+    volumes:
+      - ./config:/app/config:ro
+      - ./data:/app/data

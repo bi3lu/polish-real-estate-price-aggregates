@@ -9,6 +9,8 @@ source-neutral ingestion and ETL pipeline.
   storage, public exports, and CI.
 - [Source Configuration](source-configuration.md) - YAML source definitions,
   adapter registry, property type mapping, and local/private config rules.
+- [Docker](docker.md) - container image, Compose background loop, volumes, and
+  runtime variables.
 - [Data Pipeline](data-pipeline.md) - bronze, silver, gold, public, and
   analytics layers.
 - [Component Diagram](component-diagram.md) - Python modules and their

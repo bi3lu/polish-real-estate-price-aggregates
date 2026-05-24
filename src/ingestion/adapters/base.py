@@ -17,7 +17,11 @@ from src.ingestion.parsing import (
     extract_listing_items,
     get_estate_info,
 )
-from src.ingestion.transport import build_listing_url, extract_next_data_from_html
+from src.ingestion.transport import (
+    build_listing_url,
+    extract_next_data_from_html,
+    extract_prerendered_state_from_html,
+)
 
 TextFetcher = Callable[[str], str]
 
@@ -197,4 +201,11 @@ def _payload_to_mapping(payload: str) -> Mapping[str, Any]:
 
         return cast(dict[str, Any], parsed_payload)
 
-    return extract_next_data_from_html(payload)
+    try:
+        return extract_next_data_from_html(payload)
+
+    except ValueError as exc:
+        if "Could not find __NEXT_DATA__" not in str(exc):
+            raise
+
+    return extract_prerendered_state_from_html(payload)

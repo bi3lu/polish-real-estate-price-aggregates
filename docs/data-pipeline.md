@@ -2,61 +2,56 @@
 
 ```mermaid
 flowchart TD
-    source_config[config/sources*.yaml<br/>source definitions]
-    config_types[src.config.types<br/>shared type aliases]
-    config_loader[src.config.source_config<br/>Pydantic validation]
-    cli[main.py / src.utils.cli]
-    ingestion[src.ingestion.estate_ingestion<br/>compatibility facade]
-    ingestion_pipeline[src.ingestion.pipeline<br/>pagination + resume]
-    ingestion_transport[src.ingestion.transport<br/>listing/detail fetch]
-    ingestion_parsing[src.ingestion.parsing<br/>raw observation mapping]
+    example_config[config/sources.example.yaml<br/>synthetic public example]
+    local_config[config/sources.local.yaml<br/>private local config]
+    config_loader[src.config.source_config]
+    registry[src.ingestion.registry]
+    adapters[src.ingestion.adapters<br/>neutral SourceAdapter implementations]
+    pipeline[src.ingestion.pipeline]
+    transport[src.ingestion.transport]
+    parsing[src.ingestion.parsing]
+    raw_model[RawListingObservation]
     bronze_storage[src.utils.storage]
-    bronze[(data/bronze<br/>JSONL snapshots + manifest)]
+    bronze[(data/bronze<br/>source_id/run_id partitions<br/>manifest.json)]
     silver_etl[src.etl.silver]
-    silver[(data/silver<br/>normalized CSV)]
+    canonical[CanonicalListing]
+    silver[(data/silver<br/>CSV snapshots<br/>canonical JSONL partitions)]
     gold_etl[src.etl.gold]
     gold[(data/gold<br/>features + aggregates + quality)]
     public_etl[src.etl.public]
-    public[(data/public<br/>anonymized CSV + quality)]
-    market_ranking[src.analytics.market_ranking<br/>market rankings]
-    public_readme[data/public/README.md]
+    public[(data/public<br/>anonymized CSV exports)]
+    ranking[src.analytics.market_ranking]
 
-    source_config --> config_loader
-    config_loader --> cli
-    config_types --> cli
-    config_types --> ingestion_pipeline
-    config_types --> market_ranking
-    cli --> ingestion
-    ingestion --> ingestion_pipeline
-    ingestion_pipeline --> ingestion_transport
-    ingestion_pipeline --> ingestion_parsing
-    ingestion_pipeline --> bronze_storage
+    example_config --> config_loader
+    local_config --> config_loader
+    config_loader --> registry
+    registry --> adapters
+    adapters --> pipeline
+    pipeline --> transport
+    pipeline --> parsing
+    parsing --> raw_model
+    raw_model --> bronze_storage
     bronze_storage --> bronze
     bronze --> silver_etl
-    silver_etl --> silver
+    silver_etl --> canonical
+    canonical --> silver
     silver --> gold_etl
     gold_etl --> gold
     gold --> public_etl
     public_etl --> public
-    public --> market_ranking
-    public --> public_readme
+    public --> ranking
 ```
 
-The pipeline follows a layered data engineering pattern:
+Layer responsibilities:
 
-- `bronze`: source-id partitioned run data and per-run manifests.
-- `silver`: normalized listing records with validated fields, including
-  source-id and month partitioned canonical JSONL outputs.
-- `gold`: model-ready features, geographic aggregates, segment aggregates, and
-  quality metrics.
-- `public`: anonymized records designed for safe public analysis.
-- `analytics`: command-line summaries and rankings derived from public data.
+- `bronze`: private raw observations partitioned by neutral `source_id` and
+  per-source `run_id`, with manifests and resume checkpoint metadata.
+- `silver`: normalized `CanonicalListing` records. The layer writes canonical
+  JSONL partitions by `source_id` and month, plus CSV snapshots used by existing
+  downstream ETL.
+- `gold`: model-ready listing features, geographic aggregates, segment
+  aggregates, and quality metrics.
+- `public`: privacy-filtered CSV exports with direct identifiers removed.
+- `analytics`: public-data ranking utilities that require no private data.
 
-Ingestion is implemented as a small facade plus focused internal modules. The
-facade preserves the historical import path, while `pipeline`, `transport`, and
-`parsing` keep pagination, network fetching, and source-payload normalization
-separate.
-
-Shared type aliases are centralized in `src.config.types`, including ingestion
-progress callbacks, search shard strategy names, market-ranking group/sort
-options, and generic helper type variables used by ETL modules.
+The repository ignores local bronze, silver, gold, and demo outputs.

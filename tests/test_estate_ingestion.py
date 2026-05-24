@@ -171,6 +171,65 @@ def test_iter_estates_skips_property_types_not_allowed_by_source() -> None:
     ]
 
 
+def test_iter_estates_does_not_fetch_details_for_html_sources() -> None:
+    detail_urls: list[str] = []
+
+    def fetcher(url: str) -> Mapping[str, Any]:
+        return {
+            "listing": {
+                "listing": {
+                    "ads": [
+                        {
+                            "id": "listing-1",
+                            "title": "Synthetic HTML Listing",
+                            "url": (
+                                "https://example-listing-site-2.local/"
+                                "synthetic-html-listing-ID1.html"
+                            ),
+                            "price": {"regularPrice": {"value": 430000}},
+                            "location": {"cityName": "Example City"},
+                        }
+                    ]
+                }
+            }
+        }
+
+    def detail_fetcher(url: str) -> Mapping[str, Any]:
+        detail_urls.append(url)
+        return {}
+
+    source = SourceDefinition(
+        source_id="source_b",
+        adapter_type="html_listing_site",
+        enabled=True,
+        base_url="https://example-listing-site-2.local",
+        search_url_template=(
+            "https://example-listing-site-2.local/{property_type}/"
+            "{voivodeship}/?page={page}"
+        ),
+        rate_limit_seconds=0,
+        max_pages_default=1,
+        allowed_offer_types=("sale",),
+        allowed_property_types=("dom",),
+        property_type_mapping={"dom": "houses"},
+    )
+
+    estates = list(
+        iter_estates(
+            estate_types=("dom",),
+            voivodeships=("mazowieckie",),
+            max_page=1,
+            fetcher=fetcher,
+            detail_fetcher=detail_fetcher,
+            sources=(source,),
+        )
+    )
+
+    assert [estate.external_id for estate in estates] == ["listing-1"]
+    assert estates[0].city == "Example City"
+    assert detail_urls == []
+
+
 def test_extract_next_data_from_html_parses_next_script() -> None:
     html = _fixture_text("source_a", "search_page.html")
 

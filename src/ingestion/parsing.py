@@ -34,6 +34,8 @@ def extract_listing_items(next_data_json: Mapping[str, Any]) -> list[dict[str, A
         ("pageProps", "data", "searchAds", "items"),
         ("pageProps", "searchAds", "items"),
         ("data", "searchAds", "items"),
+        ("data", "results"),
+        ("listing", "listing", "ads"),
         ("searchAds", "items"),
     )
 

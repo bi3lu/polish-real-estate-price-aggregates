@@ -378,7 +378,12 @@ def iter_estates_for(
             enriched_item = enrich_listing_item(
                 listing_item,
                 detail_fetcher=(
-                    fetch_detail_payload if detail_fetcher is not None else None
+                    fetch_detail_payload
+                    if (
+                        detail_fetcher is not None
+                        and _fetch_details_for_source(source_config)
+                    )
+                    else None
                 ),
                 detail_base_url=detail_base_url,
             )
@@ -1008,6 +1013,13 @@ def _allow_missing_next_data(source_config: SourceDefinition | None) -> bool:
     return (
         source_config is not None
         and source_config.adapter_type == "html_listing_site"
+    )
+
+
+def _fetch_details_for_source(source_config: SourceDefinition | None) -> bool:
+    return (
+        source_config is None
+        or source_config.adapter_type != "html_listing_site"
     )
 
 

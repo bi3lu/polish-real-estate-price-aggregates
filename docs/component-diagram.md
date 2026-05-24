@@ -4,84 +4,68 @@
 flowchart LR
     app[src.app]
     cli[src.utils.cli]
-    config[src.config<br/>env.py + globals.py + types.py]
-    ingestion_facade[src.ingestion<br/>estate_ingestion.py facade]
-    ingestion_pipeline[src.ingestion.pipeline<br/>pagination + workers]
-    ingestion_transport[src.ingestion.transport<br/>HTTP + Next.js payloads]
-    ingestion_parsing[src.ingestion.parsing<br/>listing/detail mapping]
-    storage[src.utils.storage]
-    logger[src.utils.logger]
-    models[src.models<br/>Pydantic schemas]
-    silver[src.etl.silver]
+    source_config[src.config.source_config<br/>YAML loading + Pydantic validation]
+    globals[src.config.globals<br/>project constants]
+    types[src.config.types<br/>shared aliases]
+
+    registry[src.ingestion.registry<br/>adapter registry]
+    adapters[src.ingestion.adapters.base<br/>SourceAdapter protocol<br/>neutral adapters]
+    pipeline[src.ingestion.pipeline<br/>pagination + sharding + workers]
+    transport[src.ingestion.transport<br/>HTTP + embedded JSON extraction]
+    parsing[src.ingestion.parsing<br/>payload to raw observation]
+    ingestion_models[src.ingestion.models<br/>RawListingObservation<br/>CanonicalListing<br/>SourceRun]
+    facade[src.ingestion.estate_ingestion<br/>compatibility facade]
+
+    storage[src.utils.storage<br/>bronze manifests + partitions]
+    silver[src.etl.silver<br/>CanonicalListing normalization]
     gold[src.etl.gold]
     public[src.etl.public]
     analytics[src.analytics.market_ranking]
-    tests[tests]
+    tests[tests<br/>synthetic offline fixtures]
 
     app --> cli
-    cli --> config
-    cli --> ingestion_facade
+    cli --> source_config
+    cli --> registry
     cli --> storage
-    cli --> logger
+    cli --> facade
 
-    ingestion_facade --> ingestion_pipeline
-    ingestion_facade --> ingestion_parsing
-    ingestion_facade --> ingestion_transport
+    source_config --> globals
+    registry --> adapters
+    registry --> source_config
 
-    ingestion_pipeline --> config
-    ingestion_pipeline --> models
-    ingestion_pipeline --> logger
-    ingestion_pipeline --> ingestion_parsing
-    ingestion_pipeline --> ingestion_transport
+    facade --> pipeline
+    pipeline --> transport
+    pipeline --> parsing
+    pipeline --> ingestion_models
+    pipeline --> types
+    pipeline --> adapters
+    adapters --> transport
+    adapters --> parsing
+    adapters --> ingestion_models
+    parsing --> ingestion_models
 
-    ingestion_transport --> config
-    ingestion_transport --> logger
-
-    ingestion_parsing --> config
-    ingestion_parsing --> models
-    ingestion_parsing --> logger
-
-    storage --> models
-    storage --> config
-    storage --> logger
-
+    storage --> ingestion_models
     silver --> storage
-    silver --> models
-    silver --> config
-    silver --> logger
+    silver --> ingestion_models
+    gold --> ingestion_models
+    public --> ingestion_models
+    analytics --> globals
 
-    gold --> models
-    gold --> config
-    gold --> logger
-
-    public --> models
-    public --> config
-    public --> logger
-
-    analytics --> config
-    analytics --> logger
-
-    tests -. verify .-> cli
-    tests -. verify .-> ingestion_facade
-    tests -. verify .-> ingestion_pipeline
-    tests -. verify .-> ingestion_transport
-    tests -. verify .-> ingestion_parsing
+    tests -. verify .-> source_config
+    tests -. verify .-> registry
+    tests -. verify .-> adapters
+    tests -. verify .-> pipeline
+    tests -. verify .-> transport
+    tests -. verify .-> parsing
     tests -. verify .-> storage
     tests -. verify .-> silver
     tests -. verify .-> gold
     tests -. verify .-> public
-    tests -. verify .-> analytics
 ```
 
-The ingestion package is split into focused modules: `transport` handles HTTP,
-shared source cooldowns, and embedded Next.js payload extraction, `parsing`
-converts raw listing/detail payloads into `Estate` models, and `pipeline` owns
-pagination, resume behavior, and threaded streaming. `estate_ingestion.py`
-remains as a compatibility facade for existing imports.
+The ingestion layer is source-neutral. `registry.py` builds adapters from YAML
+config, `adapters/base.py` provides reusable technical adapters, and
+`pipeline.py` handles orchestration without knowing a real source brand.
 
-Shared project configuration lives under `src.config`: `env.py` reads runtime
-settings, `globals.py` keeps constants and field lists, and `types.py` collects
-cross-module type aliases used by ingestion, ETL helpers, and analytics CLIs.
-
-The project keeps source-specific ingestion, storage, ETL transformations, and
-data models separated so each layer can be tested independently.
+Downstream ETL consumes `CanonicalListing` records produced from neutral
+`RawListingObservation` inputs.

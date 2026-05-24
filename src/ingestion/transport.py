@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -245,6 +246,28 @@ def extract_next_data_from_html(html_content: str) -> dict[str, Any]:
     return cast(dict[str, Any], parsed_json)
 
 
+_PRERENDERED_STATE_RE = re.compile(
+    r"window\.__PRERENDERED_STATE__\s*=\s*(\"(?:\\.|[^\"\\])*\")\s*;",
+    re.DOTALL,
+)
+
+
+def extract_prerendered_state_from_html(html_content: str) -> dict[str, Any]:
+    """Extract a JSON state object embedded as a JavaScript string literal."""
+    match = _PRERENDERED_STATE_RE.search(html_content)
+
+    if match is None:
+        raise ValueError("Could not find embedded prerendered state in response HTML")
+
+    state_text = json.loads(match.group(1))
+    parsed_state = json.loads(state_text)
+
+    if not isinstance(parsed_state, dict):
+        raise ValueError("Prerendered state JSON root is not an object")
+
+    return cast(dict[str, Any], parsed_state)
+
+
 def fetch_next_data_json(
     url: str,
     *,
@@ -316,9 +339,14 @@ def fetch_next_data_json(
                 return extract_next_data_from_html(response_text)
 
             except ValueError as exc:
-                if allow_missing_next_data and "Could not find __NEXT_DATA__" in str(
-                    exc
-                ):
+                if "Could not find __NEXT_DATA__" not in str(exc):
+                    raise
+
+            try:
+                return extract_prerendered_state_from_html(response_text)
+
+            except ValueError as exc:
+                if allow_missing_next_data and "Could not find embedded" in str(exc):
                     logger.warning(
                         "No embedded listing data found for %s; treating page as empty",
                         url,

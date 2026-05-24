@@ -6,71 +6,74 @@ sequenceDiagram
     participant Main as main.py
     participant CLI as src.utils.cli
     participant Config as src.config.source_config
-    participant Store as src.utils.storage
-    participant Facade as src.ingestion.estate_ingestion
+    participant Registry as src.ingestion.registry
+    participant Adapter as SourceAdapter
     participant Pipeline as src.ingestion.pipeline
     participant Transport as src.ingestion.transport
     participant Parsing as src.ingestion.parsing
-    participant Source as Listing service
+    participant Storage as src.utils.storage
     participant Bronze as data/bronze
+    participant Source as Configured source
 
     User->>Main: uv run python main.py
     Main->>CLI: main(args)
-    CLI->>Config: load and validate sources YAML
-    CLI->>Store: load existing external ids
-    Store-->>CLI: ids by voivodeship
-    CLI->>Store: load page checkpoints
-    Store-->>CLI: last completed pages
-    CLI->>Facade: iter_estates(...)
-    Facade->>Pipeline: delegate streaming ingestion
+    CLI->>Config: load sources YAML
+    Config-->>CLI: validated SourceConfig
+    CLI->>Registry: build_adapters(config)
+    Registry-->>CLI: enabled neutral adapters
+    CLI->>Storage: load existing ids and checkpoints
+    Storage-->>CLI: resume metadata
+    CLI->>Pipeline: iter_estates(..., sources=adapters)
 
-    loop source x estate type x voivodeship x shard x page
-        Pipeline->>Transport: fetch listing page
-        Transport->>Source: HTTP request
-        Source-->>Transport: JSON or embedded Next.js payload
-        Transport-->>Pipeline: parsed payload
+    loop source x property type x voivodeship x shard x page
+        Pipeline->>Adapter: source metadata and config
+        Pipeline->>Transport: fetch listing URL
+        Transport->>Source: HTTP request with pacing
+        Source-->>Transport: JSON or HTML with embedded state
+        Transport-->>Pipeline: parsed mapping
         Pipeline->>Parsing: extract listing items
-        Pipeline->>Transport: fetch listing detail page when available
-        Transport->>Source: HTTP request
-        Source-->>Transport: detail payload
-        Transport-->>Pipeline: parsed detail payload
-        Pipeline->>Parsing: map listing/detail payload to RawListingObservation
-        Pipeline-->>Facade: raw observations
-        Facade-->>CLI: raw observations
+        Pipeline->>Parsing: get RawListingObservation
+        Parsing-->>Pipeline: neutral raw observation
+        Pipeline-->>CLI: stream observation
     end
 
-    CLI->>Store: stream_estates_to_bronze(...)
-    Store->>Bronze: append source-id/run-id JSONL records
-    Store->>Bronze: write per-run manifests and checkpoints
-    Store-->>CLI: output path and new record count
+    CLI->>Storage: stream_estates_to_bronze(...)
+    Storage->>Bronze: write source_id/run_id observations
+    Storage->>Bronze: write per-run manifest
+    Storage->>Bronze: update root manifest and checkpoints
+    Storage-->>CLI: manifest path and count
     CLI-->>User: JSON summary
 ```
 
-The ingestion flow is resumable. Existing external ids prevent duplicate writes,
-and page checkpoints allow later runs to continue from the last completed target.
-The public import surface remains `src.ingestion.estate_ingestion`, but the
-runtime work is delegated to smaller modules for transport, parsing, and
-pagination/thread orchestration.
+## Resume Behavior
 
-Pass `--ignore-checkpoints` to force selected targets to start from page 1 while
-still deduplicating records already present in bronze storage. This is useful
-for periodic refresh runs when new listings may have appeared before the saved
-checkpoint.
+Ingestion is resumable:
 
-Resume and refresh runs stop on duplicate-only pages only when explicitly
-requested. The default threshold is `0`, which keeps scanning through
-duplicate-only pages during backfills; tune it with
-`--duplicate-page-stop-threshold` for smaller refresh windows. The pipeline
-still stops when the source starts returning an already-seen listing page
-signature, which protects against clamped or looping pagination.
+- existing bronze ids prevent duplicate writes,
+- page checkpoints track the last completed page per target,
+- `--ignore-checkpoints` restarts selected targets from page 1 while still
+  deduplicating existing records,
+- repeated listing page signatures stop looping pagination,
+- `--duplicate-page-stop-threshold` can stop refresh runs after repeated
+  duplicate-only pages.
 
-Large source searches can be split with `--shard-strategy`. The CLI defaults to
-`market-price`, creating independent market and price-range targets with their
-own page checkpoints. This makes long regional runs easier to resume after a
-403 or interruption and avoids relying on a single broad result set.
+## Sharding
 
-The transport layer treats `403` and `429` responses as source throttling. When
-that happens it enters a shared cooldown, honors `Retry-After` when present, and
-retries the blocked request with exponential backoff and jitter. The cooldown is
-shared across worker threads, so one blocked request slows the whole scraper
-instead of letting parallel workers keep hammering the source.
+`--shard-strategy` can split broad searches into independent targets:
+
+- `none`
+- `price`
+- `market-price`
+
+Each shard has its own checkpoint key, which makes long collection runs easier
+to resume.
+
+## Source-Specific Behavior Without Brand Classes
+
+The pipeline receives `SourceAdapter` instances built from config. It uses
+`source_id`, `adapter_type`, rate limits, page caps, and property type mappings,
+but it does not need to know the real source name.
+
+`html_listing_site` sources are parsed from listing pages and skip detail-page
+enrichment by default when detail pages do not expose a stable embedded detail
+object.

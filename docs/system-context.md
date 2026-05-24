@@ -3,21 +3,25 @@
 ```mermaid
 flowchart LR
     user[Data engineer or analyst]
-    source[Popular Polish real estate listing service]
+    local_config[Private local source config<br/>config/sources.local.yaml]
+    example_config[Public synthetic config<br/>config/sources.example.yaml]
+    sources[Configured listing sources<br/>identified by source_id]
     repo[Python data pipeline]
-    local[(Local data directory)]
-    public[Anonymized public CSV dataset]
-    ci[GitHub Actions CI]
+    private_data[(Local private data<br/>bronze / silver / gold)]
+    public_data[(Anonymized public exports<br/>data/public)]
+    ci[GitHub Actions CI<br/>synthetic config + offline tests]
 
-    user -->|configures sources.local.yaml and runs commands| repo
-    source -->|listing result and detail pages| repo
-    repo -->|bronze, silver, gold, public outputs| local
-    local -->|selected anonymized files| public
-    repo -->|tests, lint, type checks| ci
-
-    public -->|analysis, research, ML experiments| user
+    user -->|creates local config and runs CLI| repo
+    example_config -->|CI and documentation examples| repo
+    local_config -->|runtime source definitions| repo
+    repo -->|HTTP requests with source pacing| sources
+    sources -->|HTML / embedded JSON / JSON payloads| repo
+    repo -->|raw and normalized private outputs| private_data
+    private_data -->|privacy-filtered ETL| public_data
+    public_data -->|analysis, rankings, ML examples| user
+    repo -->|lint, type checks, tests| ci
 ```
 
-The source service is intentionally described generically. Runtime source
-definitions are provided locally through `config/sources.local.yaml` and are not
-committed to the repository.
+The repository should not expose real source names, real source URLs, or raw
+source payloads. Runtime sources are configured locally and stored by neutral
+`source_id` values.

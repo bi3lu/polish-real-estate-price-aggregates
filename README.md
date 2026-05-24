@@ -10,184 +10,46 @@
 Python data pipeline for collecting, normalizing, aggregating, and publishing
 analysis-ready Polish residential real estate listing data.
 
-The project reads listing data from one of the popular real estate advertising
-services in Poland, stores raw records in a bronze layer, transforms them into a
-clean silver dataset, builds gold analytical tables, and exports an anonymized
-public dataset suitable for exploratory analysis and machine-learning
-experiments.
+The project is source-neutral by design. Runtime sources are configured in YAML,
+identified by opaque `source_id` values, and handled through neutral adapter
+types such as `embedded_json_listing_site` and `html_listing_site`. Domain
+models and downstream ETL operate on `RawListingObservation` and
+`CanonicalListing`, not on source-branded schemas.
 
-The repository intentionally does not include source-service branding in the
-documentation. To run ingestion, provide source definitions in your private
-`config/sources.local.yaml` file.
+Raw collection output is local-only and ignored by Git. Public sharing is
+limited to anonymized exports in `data/public/`.
 
-Raw bronze data is not published from this repository. Public sharing is limited
-to anonymized outputs in `data/public/`.
+## Highlights
 
-## Portfolio Highlights
+- Config-driven ingestion for multiple sources without hardcoded branded classes.
+- Neutral adapter registry and reusable source adapters.
+- Bronze storage partitioned by `source_id` and per-source `run_id`.
+- Per-run manifests with ingestion counters and source metadata.
+- Silver canonical JSONL partitions plus legacy CSV snapshots for downstream
+  compatibility.
+- Gold analytical features, aggregates, and data quality tables.
+- Public anonymized exports and a market-ranking CLI.
+- Offline synthetic tests with no real HTML fixtures, real source URLs, or live
+  requests in CI.
+- Strict static checks with `ruff`, `black`, `isort`, `mypy`, and `pytest`.
 
-- End-to-end data engineering pipeline with bronze, silver, gold, and public
-  data layers.
-- Offline demo mode that runs the full ETL flow from local fixture records
-  without requiring source-service configuration.
-- Resumable listing ingestion with duplicate detection and page checkpoints.
-- Typed Pydantic models and strict static analysis with `mypy`.
-- Feature engineering, aggregate tables, and data quality outputs for analytics
-  and ML workflows.
-- Market ranking CLI for comparing public regional and segment-level price
-  metrics directly from anonymized public exports.
-- Privacy-aware public dataset export with location generalization, rounded
-  targets, attribution, and Git LFS tracking.
-- CI coverage for linting, formatting, type checks, and tests.
-
-## What This Project Produces
-
-The pipeline writes data into four layers:
+## Pipeline Outputs
 
 | Layer | Location | Purpose |
 | --- | --- | --- |
-| Bronze | `data/bronze/` | Raw ingested listing snapshots and resume checkpoints. |
-| Silver | `data/silver/` | Flat, normalized listing records with validated types. |
-| Gold | `data/gold/` | ML-ready features, geographic aggregates, segment aggregates, and data quality metrics. |
-| Public | `data/public/` | Anonymized public CSV exports with sensitive fields removed or generalized. |
+| Bronze | `data/bronze/<source_id>/<run_id>/` | Local raw observations and per-run manifests. |
+| Silver | `data/silver/` | Normalized `CanonicalListing` records and canonical JSONL partitions. |
+| Gold | `data/gold/` | ML-ready features, aggregates, and quality metrics. |
+| Public | `data/public/` | Anonymized CSV exports suitable for analysis and examples. |
 
-The public dataset is documented separately in
-[`data/public/README.md`](data/public/README.md).
-
-Architecture and UML-style diagrams are available in [`docs/`](docs/README.md).
-
-## Example Insights
-
-The current public export contains 53,022 anonymized listings from selected
-voivodeships. It is a regional sample rather than a complete national market
-dataset, but it is large enough to demonstrate the analytical outputs produced
-by the pipeline.
-
-Example findings from the published public dataset:
-
-- Malopolskie and Mazowieckie have the highest median public price per square
-  meter in the sample, at about 13,500 PLN/sqm and 13,100 PLN/sqm respectively.
-- Apartments are priced much higher per square meter than houses in the sample:
-  median public price per square meter is about 11,800 PLN/sqm for apartments
-  versus 6,800 PLN/sqm for houses.
-- Studio apartments have the highest median price density at about
-  13,500 PLN/sqm, which is consistent with smaller units carrying a higher
-  price per square meter.
-- The public export keeps 98.96% of price targets, exposes public city labels
-  for 76.19% of records, and exposes generalized coordinate-grid locations for
-  12.12% of records after privacy filtering.
-
-Median public price per square meter by voivodeship:
-
-| Rank | Voivodeship | Records | Median public price per sqm |
-| ---: | --- | ---: | ---: |
-| 1 | `malopolskie` | 12,261 | 13,500 PLN |
-| 2 | `mazowieckie` | 6,213 | 13,100 PLN |
-| 3 | `pomorskie` | 8,074 | 10,100 PLN |
-| 4 | `wielkopolskie` | 2,877 | 9,000 PLN |
-| 5 | `lodzkie` | 1,289 | 8,400 PLN |
-| 6 | `podkarpackie` | 4,190 | 8,100 PLN |
-| 7 | `dolnoslaskie` | 5,933 | 7,700 PLN |
-| 8 | `podlaskie` | 2,224 | 7,600 PLN |
-| 9 | `slaskie` | 7,915 | 7,000 PLN |
-| 10 | `opolskie` | 2,046 | 6,800 PLN |
-
-Segment-level comparison:
-
-| Segment | Records | Median public price per sqm |
-| --- | ---: | ---: |
-| Studio apartments | 7,810 | 13,500 PLN |
-| Apartments | 22,227 | 11,800 PLN |
-| Houses | 22,985 | 6,800 PLN |
-
-Public dataset coverage summary:
-
-| Metric | Value |
-| --- | ---: |
-| Public records | 53,022 |
-| Records with public price target | 98.96% |
-| Records with public city | 76.19% |
-| Records with generalized geo grid | 12.12% |
-| Distinct public cities | 442 |
-
-Sample public rows:
-
-| Estate type | Voivodeship | Public city | Area bucket | Price bucket | Public target price per sqm |
-| --- | --- | --- | --- | --- | ---: |
-| `dom` | `dolnoslaskie` | `Wrocław` | `gte_150` | `gte_1_5m` | 11,800 PLN |
-| `dom` | `dolnoslaskie` | suppressed | `gte_150` | `gte_1_5m` | 7,400 PLN |
-| `dom` | `dolnoslaskie` | suppressed | `100_150` | `750k_1m` | 7,900 PLN |
-
-The same outputs can be used for ranking local markets, comparing property
-segments, auditing missingness, preparing ML features, or publishing a
-privacy-aware dataset without exposing listing-level source identifiers.
-
-## Features
-
-- CLI-based ingestion with configurable estate types, voivodeships, page limits,
-  and worker threads.
-- Resume support based on existing bronze external ids and page checkpoints.
-- Bronze JSONL storage split by voivodeship.
-- Bronze-to-silver normalization with Pydantic validation.
-- Silver-to-gold feature engineering and aggregate tables.
-- Gold-to-public anonymization with location suppression, rounded price targets,
-  and bucketed attributes.
-- Public market ranking CLI with configurable grouping, sorting, filters, and
-  table, JSON, or CSV output modes.
-- Data quality exports for gold and public layers.
-- Type checking and test coverage through `mypy`, `ruff`, `black`, `isort`, and
-  `pytest`.
+Bronze, silver, gold, and demo directories are ignored by Git. The repository
+contains only synthetic source configuration and synthetic test fixtures.
 
 ## Requirements
 
 - Python 3.10 or newer.
 - `uv` for dependency management.
-- Git LFS if you want to version public CSV datasets from `data/public`.
-
-Install `uv` using the official instructions for your operating system, then
-install project dependencies with:
-
-```bash
-uv sync --dev
-```
-
-If you plan to work with public CSV files tracked by Git LFS:
-
-```bash
-git lfs install
-git lfs pull
-```
-
-## Configuration
-
-Source definitions are loaded from YAML. The repository includes only a public,
-synthetic example:
-
-```bash
-config/sources.example.yaml
-```
-
-For real local runs, create a private config file:
-
-```bash
-cp config/sources.example.yaml config/sources.local.yaml
-```
-
-Each source defines `source_id`, `adapter_type`, `enabled`, `base_url`,
-`search_url_template`, required `rate_limit_seconds`, `max_pages_default`,
-`respect_robots_txt`,
-`allowed_offer_types`, and `allowed_property_types`. The default loader uses
-`config/sources.local.yaml` when present, otherwise `config/sources.example.yaml`.
-
-Safe defaults are intentionally conservative:
-
-- CLI `--max-page` defaults to `3` and is hard-capped at `50` pages per target.
-- Each source can further lower pagination via `max_pages_default`.
-- HTTP retries use exponential backoff instead of fixed retry bursts.
-
-`config/sources.local.yaml` is intentionally ignored by Git. Do not commit real
-source URLs, credentials, or local configuration.
-
-## Quick Start
+- Git LFS if you want to work with tracked public CSV exports.
 
 Install dependencies:
 
@@ -195,142 +57,199 @@ Install dependencies:
 uv sync --dev
 ```
 
-Run the offline demo pipeline without contacting any configured source:
+Optional Git LFS setup:
 
 ```bash
-uv run python -m src.etl.demo
+git lfs install
+git lfs pull
 ```
 
-The demo writes deterministic fixture-based outputs under `data/demo/` for all
-pipeline layers: bronze, silver, gold, and public. This is the fastest way to
-review the project flow in a fresh checkout.
+## Source Configuration
 
-Run a small ingestion job for one estate type and one voivodeship:
+The public repository contains only:
+
+```text
+config/sources.example.yaml
+```
+
+For local ingestion, create a private config:
+
+```bash
+cp config/sources.example.yaml config/sources.local.yaml
+```
+
+`config/sources.local.yaml` is ignored by Git. Do not commit real source URLs,
+credentials, raw output, or private collection settings.
+
+Each source supports:
+
+| Field | Description |
+| --- | --- |
+| `source_id` | Opaque local identifier used in storage and records. It does not need to reveal the real source name. |
+| `adapter_type` | Neutral adapter type. Supported values are registered in `src/ingestion/registry.py`. |
+| `enabled` | Enables or disables the source without code changes. |
+| `base_url` | Base URL used for detail URL normalization. |
+| `search_url_template` | Search URL template. Must include `{page}` and can use `{property_type}`, `{voivodeship}`, `{source_id}`, `{canonical_property_type}`. |
+| `rate_limit_seconds` | Per-source pacing between HTTP requests. |
+| `max_pages_default` | Per-source page cap. The CLI cap and hard project cap still apply. |
+| `respect_robots_txt` | Policy flag documenting the expected collection posture. |
+| `allowed_offer_types` | Allowed offer categories for the source config. |
+| `allowed_property_types` | Canonical property types this source should receive, such as `mieszkanie` or `dom`. |
+| `property_type_mapping` | Optional mapping from canonical project types to source-specific URL slugs. |
+
+Example:
+
+```yaml
+sources:
+  - source_id: source_a
+    adapter_type: embedded_json_listing_site
+    enabled: true
+    base_url: "https://example-listing-site.local"
+    search_url_template: "https://example-listing-site.local/search/{property_type}/{voivodeship}?page={page}"
+    rate_limit_seconds: 5
+    max_pages_default: 3
+    respect_robots_txt: true
+    allowed_offer_types:
+      - sale
+    allowed_property_types:
+      - mieszkanie
+      - dom
+    property_type_mapping:
+      mieszkanie: apartments
+      dom: houses
+```
+
+The pipeline keeps canonical values in records, checkpoints, and ETL. The
+mapping is used only when building source URLs.
+
+More detail: [docs/source-configuration.md](docs/source-configuration.md).
+
+## Running Ingestion
+
+Run one small target:
 
 ```bash
 uv run python main.py \
   --estate-type mieszkanie \
   --voivodeship mazowieckie \
-  --max-page 2 \
+  --max-page 1 \
   --workers 1 \
   --pretty
 ```
 
-Run the full configured ingestion:
+Run all enabled local sources with default filters:
 
 ```bash
 uv run python main.py
 ```
 
-The command prints a JSON summary containing the output path and number of newly
-written records.
-
-## CLI Options
-
-```bash
-uv run python main.py --help
-```
-
-Common options:
+Useful options:
 
 | Option | Description |
 | --- | --- |
-| `--estate-type`, `-t` | Estate type slug. Can be repeated or passed as comma-separated values. |
-| `--voivodeship`, `-v` | Voivodeship slug. Can be repeated or passed as comma-separated values. |
-| `--max-page` | Maximum page to process per estate type and voivodeship combination. |
-| `--workers`, `--threads` | Number of worker threads used across ingestion targets. |
-| `--ignore-checkpoints` | Start selected targets from page 1 instead of saved resume checkpoints while still deduplicating existing bronze ids. |
-| `--duplicate-page-stop-threshold` | Optional stop for consecutive duplicate-only pages. Defaults to `0`, which disables this stop; repeated source pages are still detected. |
-| `--shard-strategy` | Split large searches into smaller source queries. Defaults to `market-price`; use `price` or `none` for narrower control. |
-| `--source-config` | Path to a YAML source config. Defaults to local config when present, otherwise the synthetic example. |
+| `--estate-type`, `-t` | Canonical estate type. Can be repeated or comma-separated. |
+| `--voivodeship`, `-v` | Voivodeship slug. Can be repeated or comma-separated. |
+| `--max-page` | Requested page cap per target. Also limited by source config and the project hard cap. |
+| `--workers`, `--threads` | Number of worker threads across ingestion targets. |
+| `--ignore-checkpoints` | Start selected targets from page 1 while still deduplicating existing bronze ids. |
+| `--duplicate-page-stop-threshold` | Stop after N consecutive duplicate-only pages. `0` disables this stop. |
+| `--shard-strategy` | `none`, `price`, or `market-price`. Defaults to `market-price`. |
+| `--source-config` | Explicit YAML config path. Defaults to local config when present, otherwise the example. |
 | `--pretty` | Pretty-print the JSON command output. |
 
-Configured estate types:
+The command prints a JSON summary containing the manifest path, record count,
+selected filters, and enabled `source_id` values.
 
-- `mieszkanie`
-- `dom`
-- `kawalerka`
+## Storage Layout
 
-Configured voivodeships are defined in `src/config/globals.py`.
+Current bronze layout:
 
-## Offline Demo Pipeline
+```text
+data/
+  bronze/
+    manifest.json
+    source_a/
+      2026-05-23T10-30-00Z/
+        manifest.json
+        observations.jsonl
+```
 
-For reviewers who only want to inspect the ETL flow, the project includes a
-fully local demo mode:
+Each source run manifest contains fields such as:
+
+```json
+{
+  "source_id": "source_a",
+  "run_id": "2026-05-23T10-30-00Z",
+  "adapter_type": "embedded_json_listing_site",
+  "started_at": "2026-05-23T10:30:00Z",
+  "finished_at": "2026-05-23T10:35:00Z",
+  "pages_requested": 3,
+  "pages_succeeded": 3,
+  "records_raw": 142,
+  "records_canonical": 137,
+  "parser_errors": 0
+}
+```
+
+Current silver canonical layout:
+
+```text
+data/
+  silver/
+    canonical_listings/
+      source_id=source_a/
+        month=2026-05/
+          listings.jsonl
+```
+
+Gold and public layers are written as timestamped CSV outputs under
+`data/gold/` and `data/public/`.
+
+## ETL
+
+Run stages after bronze data exists:
+
+```bash
+uv run python -m src.etl.silver
+uv run python -m src.etl.gold
+uv run python -m src.etl.public
+```
+
+Silver loads bronze observations and writes normalized `CanonicalListing`
+records. Gold reads silver outputs and builds feature tables, geographic
+aggregates, segment aggregates, and quality metrics. Public ETL reads gold
+features and suppresses direct identifiers, street-level data, raw coordinates,
+URLs, image URLs, and seller identifiers.
+
+## Offline Demo
+
+The demo pipeline runs without contacting any configured source:
 
 ```bash
 uv run python -m src.etl.demo
 ```
 
-The command uses a small built-in fixture dataset and writes:
+It writes deterministic fixture-based outputs under:
 
-| Layer | Demo output |
-| --- | --- |
-| Bronze | `data/demo/bronze/` |
-| Silver | `data/demo/silver/` |
-| Gold | `data/demo/gold/` |
-| Public | `data/demo/public/` |
-
-The demo intentionally bypasses ingestion, does not call any configured source,
-and requires no network access. Its purpose is to make the pipeline
-reviewable in seconds while keeping real collection configuration private and
-optional.
-
-## Running the ETL Pipeline
-
-After a bronze snapshot exists, run the ETL stages in order.
-
-Bronze to silver:
-
-```bash
-uv run python -m src.etl.silver
+```text
+data/demo/bronze/
+data/demo/silver/
+data/demo/gold/
+data/demo/public/
 ```
 
-Silver to gold:
-
-```bash
-uv run python -m src.etl.gold
-```
-
-Gold to public:
-
-```bash
-uv run python -m src.etl.public
-```
-
-Each stage selects the latest input snapshot from the previous layer by default
-and writes timestamped CSV outputs to the next layer.
-
-Bronze storage is partitioned by neutral `source_id` and per-source `run_id`.
-Each run writes `data/bronze/<source_id>/<run_id>/manifest.json` plus local raw
-observation data, and the root `data/bronze/manifest.json` indexes the latest
-run manifests. Silver additionally writes canonical JSONL partitions under
-`data/silver/canonical_listings/source_id=<source_id>/month=<YYYY-MM>/`.
-Bronze, silver, gold, and demo data directories are ignored by Git.
+Use this path to review the ETL flow in a fresh checkout without private config
+or network access.
 
 ## Market Ranking CLI
 
-After a public dataset exists, generate quick analytical rankings from the
-latest public ML feature export:
+After a public dataset exists:
 
 ```bash
 uv run python -m src.analytics.market_ranking
 ```
 
-The ranking CLI uses only anonymized public fields and supports market
-comparisons by:
-
-- `voivodeship`
-- `city`
-- `estate_type`
-- `voivodeship_city`
-- `voivodeship_estate_type`
-
-It reports listing volume, median and average public price per square meter,
-quartiles, median public total price, and target coverage shares. Output can be
-rendered as a terminal table, JSON, or CSV.
-
-Common examples:
+Examples:
 
 ```bash
 uv run python -m src.analytics.market_ranking \
@@ -344,184 +263,123 @@ uv run python -m src.analytics.market_ranking \
   --format json
 ```
 
-Example table output:
+More examples: [docs/market-ranking.md](docs/market-ranking.md).
 
-| Rank | Group | Records | Median sqm | Avg sqm | Median price | SQM coverage |
-| ---: | --- | ---: | ---: | ---: | ---: | ---: |
-| 1 | `malopolskie` | 12,261 | 13,500 PLN | 13,378 PLN | 810,000 PLN | 100.00% |
-| 2 | `mazowieckie` | 6,213 | 13,100 PLN | 17,057 PLN | 850,000 PLN | 99.97% |
-| 3 | `pomorskie` | 8,074 | 10,100 PLN | 11,470 PLN | 800,000 PLN | 100.00% |
-
-More examples are available in
-[`docs/market-ranking.md`](docs/market-ranking.md).
-
-## Repository Layout
+## Architecture
 
 ```text
-.
-├── main.py
-├── src/
-│   ├── analytics/       # Public-dataset analytical CLIs
-│   ├── config/          # Environment loading, constants, and shared type aliases
-│   ├── etl/             # Bronze, silver, gold, and public ETL stages
-│   ├── models/          # Pydantic models for each data layer
-│   ├── ingestion/       # Ingestion facade, pipeline, transport, and parsing
-│   └── utils/           # CLI, logging, and storage helpers
-├── tests/               # Unit tests
-├── data/
-│   ├── bronze/
-│   ├── silver/
-│   ├── gold/
-│   └── public/
-└── .github/workflows/   # CI configuration
+main.py
+  -> src.utils.cli
+      -> src.config.source_config
+      -> src.ingestion.registry
+      -> src.ingestion.adapters.base
+      -> src.ingestion.pipeline
+      -> src.utils.storage
+
+src.etl.silver -> src.etl.gold -> src.etl.public
 ```
 
-The ingestion package is intentionally split into small modules:
-`estate_ingestion.py` keeps the stable public import path, `pipeline.py`
-orchestrates pagination and threaded streaming, `transport.py` fetches and
-parses source-service payloads, and `parsing.py` maps raw listing/detail data
-into typed `RawListingObservation` records.
+Key modules:
 
-Shared configuration is split between `source_config.py` for YAML source
-definitions, `globals.py` for project constants and field lists, and `types.py`
-for cross-module type aliases used by ingestion, ETL helpers, and analytics
-CLIs.
+| Module | Role |
+| --- | --- |
+| `src/config/source_config.py` | Pydantic validation and YAML loading for source configs. |
+| `src/ingestion/models.py` | Neutral ingestion models: `RawListingObservation`, `CanonicalListing`, source run stats. |
+| `src/ingestion/adapters/base.py` | `SourceAdapter` protocol and reusable neutral adapter classes. |
+| `src/ingestion/registry.py` | Adapter registry and dynamic adapter construction from config. |
+| `src/ingestion/transport.py` | HTTP fetching, throttling, embedded JSON extraction, retry and cooldown logic. |
+| `src/ingestion/parsing.py` | Payload-to-observation extraction. |
+| `src/ingestion/pipeline.py` | Pagination, source filtering, sharding, resume logic, threading. |
+| `src/utils/storage.py` | Bronze manifests, source/run partitioning, checkpoints. |
+| `src/etl/silver.py` | Raw observations to `CanonicalListing`. |
+| `src/etl/gold.py` | Feature and aggregate generation. |
+| `src/etl/public.py` | Privacy-aware public export. |
 
-## Development
+Diagrams live in [docs/](docs/README.md).
 
-Run tests:
+## Testing
+
+Run all tests:
 
 ```bash
 uv run pytest
 ```
 
-Run tests with coverage and refresh the local badge:
-
-```bash
-uv run pytest --cov=src --cov-report=term-missing --cov-report=json:coverage.json
-uv run python scripts/update_coverage_badge.py
-```
-
-Run linting and formatting checks:
+Run static checks:
 
 ```bash
 uv run ruff check .
 uv run black --check .
 uv run isort --check-only .
-uv run mypy .
+uv run mypy src tests
 ```
 
-Format code locally:
+Format locally:
 
 ```bash
 uv run black .
 uv run isort .
 ```
 
-## Development Workflow
+Test policy:
 
-The project was developed incrementally using feature branches and GitHub pull
-requests. Each milestone focused on a distinct layer of the data engineering
-workflow, and the finished work was merged into `main` with squash commits to
-keep the production history concise while preserving the pull request history as
-a readable record of the project's evolution.
+- Tests are offline.
+- Source fixtures live under `tests/fixtures/sources/`.
+- Fixtures are synthetic and must not contain real source HTML, real listing
+  descriptions, real source URLs, or source brands.
+- CI uses only example/synthetic config and does not perform live requests.
 
-This workflow makes the repository easier to review in two complementary ways:
-`main` shows a clean release-oriented history, while the pull requests show how
-the implementation was planned, reviewed, and expanded over time.
-
-Key development milestones:
-
-- [#2](https://github.com/bi3lu/polish-real-estate-price-aggregates/pull/2) introduced the estate scraper, bronze-layer parsing, core data models,
-  environment configuration, CLI entry point, and initial tests.
-- [#3](https://github.com/bi3lu/polish-real-estate-price-aggregates/pull/3) added the silver ETL layer, threaded ingestion, normalized storage helpers,
-  duplicate handling, and broader test coverage.
-- [#4](https://github.com/bi3lu/polish-real-estate-price-aggregates/pull/4) added the gold ETL layer, analytical aggregates, checkpointing, improved CLI
-  controls, public dataset preparation, and CI refinements.
-- [#5](https://github.com/bi3lu/polish-real-estate-price-aggregates/pull/5) finalized documentation, public dataset metadata, repository cleanup, and
-  presentation polish before merging the completed development branch into
-  `main`.
-
-The branch and pull request history therefore documents the full path from an
-initial scraper prototype to a typed, tested, CI-backed data pipeline with
-bronze, silver, gold, and public export layers.
-
-## Continuous Integration
-
-GitHub Actions CI is split into two jobs:
-
-- `linter`: runs Ruff, Black check, isort check, and mypy.
-- `tests`: runs the pytest suite.
-
-The workflow is defined in `.github/workflows/ci.yml`.
-
-## Public Dataset and Git LFS
-
-CSV files under `data/public/*.csv` are configured for Git LFS in
-`.gitattributes`:
+## Repository Layout
 
 ```text
-data/public/*.csv filter=lfs diff=lfs merge=lfs -text
+.
+├── config/
+│   └── sources.example.yaml
+├── docs/
+├── main.py
+├── src/
+│   ├── analytics/
+│   ├── config/
+│   ├── etl/
+│   ├── ingestion/
+│   │   ├── adapters/
+│   │   ├── models.py
+│   │   ├── parsing.py
+│   │   ├── pipeline.py
+│   │   ├── registry.py
+│   │   └── transport.py
+│   ├── models/
+│   └── utils/
+├── tests/
+│   └── fixtures/sources/
+└── data/
+    └── public/
 ```
 
-If you add new public CSV exports, make sure Git LFS is installed and the files
-are staged after the LFS tracking rule is present:
+## Responsible Collection
 
-```bash
-git lfs install
-git add .gitattributes data/public/*.csv
-```
+This project is for data engineering, analytics, and educational use. Keep
+collection conservative:
 
-## Data Privacy Notes
+- Respect source terms, robots policy, and applicable law.
+- Use low page limits, low worker counts, and explicit rate limits.
+- Treat `403`, `429`, challenge pages, and repeated failures as stop signals.
+- Do not add CAPTCHA solving, anti-bot bypass, proxy rotation for evasion,
+  fingerprint spoofing, account farming, or similar controls.
+- Keep raw data private and publish only anonymized public outputs after review.
+
+More detail: [docs/ethics.md](docs/ethics.md).
+
+## Public Dataset
 
 The public export removes direct listing identifiers, URLs, seller identifiers,
 street-level information, raw coordinates, and image URLs. It also suppresses or
 generalizes location fields and rounds public price targets.
 
-The current public dataset is not a complete dump of all listings in Poland. It
-contains selected voivodeships only and should be treated as a regional sample,
-not as an authoritative nationwide market dataset.
+The current public dataset is a sample produced by configured runs, not an
+official market registry or a complete national dataset. Analytical outputs are
+useful for exploration, quality monitoring, dashboards, and ML baselines, but
+should not be treated as legal, financial, valuation, or investment advice.
 
-Before publishing regenerated public data, review the output schema and sample
-rows to ensure no new sensitive or source-identifying fields were introduced.
-
-## Limitations / Trade-offs
-
-This project is intentionally built as a pragmatic data engineering pipeline,
-not as an official market registry or guaranteed complete data source. The main
-trade-offs are:
-
-- The scraper depends on the HTML and embedded Next.js data shape exposed by the
-  supported source service. If that structure changes, ingestion may need parser
-  updates before new snapshots can be collected reliably.
-- The dataset does not guarantee full coverage of the Polish residential real
-  estate market. It contains listings that were reachable during configured
-  ingestion runs for selected estate types and voivodeships.
-- Resume checkpoints reduce unnecessary pagination and lower the chance of
-  repeated blocked requests, but they can skip newly inserted listings that
-  appear on pages before the saved checkpoint. Full refreshes should clear or
-  reset checkpoint metadata intentionally.
-- The public dataset is a privacy-filtered sample, not a lossless copy of the
-  internal data. Some cities and coordinates are suppressed, numerical targets
-  are rounded, and direct identifiers are removed by design.
-- Ingestion should not be run aggressively. Use conservative worker counts,
-  bounded page ranges, pauses between runs, and responsible retry behavior. The
-  pipeline is designed for careful periodic collection, not high-pressure
-  crawling. If the source responds with `403` or `429`, the transport layer
-  backs off with a shared cooldown before retrying.
-- This project does not include CAPTCHA-solving, challenge bypassing, identity
-  spoofing, or anti-bot evasion logic. If a source blocks or challenges access,
-  stop the run and reassess collection settings and source permissions.
-- Analytical outputs should be treated as exploratory. They are useful for data
-  quality monitoring, feature engineering, dashboards, and ML baselines, but not
-  as authoritative valuation or investment advice.
-
-## Disclaimer
-
-This project is for data engineering, analytics, and educational use. Respect
-the terms of the source service, applicable law, and responsible data handling
-practices. The generated datasets should not be used as the sole basis for
-legal, financial, valuation, or investment decisions.
-
-Additional responsible-collection rules are documented in
-[`docs/ethics.md`](docs/ethics.md).
+Public dataset metadata is documented in
+[data/public/README.md](data/public/README.md).

@@ -1011,16 +1011,12 @@ def _effective_max_page(
 
 def _allow_missing_next_data(source_config: SourceDefinition | None) -> bool:
     return (
-        source_config is not None
-        and source_config.adapter_type == "html_listing_site"
+        source_config is not None and source_config.adapter_type == "html_listing_site"
     )
 
 
 def _fetch_details_for_source(source_config: SourceDefinition | None) -> bool:
-    return (
-        source_config is None
-        or source_config.adapter_type != "html_listing_site"
-    )
+    return source_config is None or source_config.adapter_type != "html_listing_site"
 
 
 def _listing_dedupe_key(listing: RawListingObservation) -> str:

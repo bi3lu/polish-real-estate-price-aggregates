@@ -48,6 +48,28 @@ def test_build_listing_url_accepts_search_query_params() -> None:
     assert query["search[filter_float_price:to]"] == ["400000"]
 
 
+def test_build_listing_url_uses_source_property_type_mapping() -> None:
+    source = SourceDefinition(
+        source_id="source_b",
+        adapter_type="html_listing_site",
+        enabled=True,
+        base_url="https://example-listing-site-2.local",
+        search_url_template=(
+            "https://example-listing-site-2.local/{property_type}/"
+            "{voivodeship}/?page={page}"
+        ),
+        rate_limit_seconds=0,
+        max_pages_default=3,
+        allowed_offer_types=("sale",),
+        allowed_property_types=("house",),
+        property_type_mapping={"house": "houses"},
+    )
+
+    assert build_listing_url("house", "example-region", page=1, source=source) == (
+        "https://example-listing-site-2.local/houses/example-region/?page=1"
+    )
+
+
 def test_iter_estates_uses_enabled_configured_sources() -> None:
     requested_urls: list[str] = []
 
@@ -76,7 +98,7 @@ def test_iter_estates_uses_enabled_configured_sources() -> None:
         rate_limit_seconds=0,
         max_pages_default=3,
         allowed_offer_types=("sale",),
-        allowed_property_types=("apartment",),
+        allowed_property_types=("mieszkanie",),
     )
     source_b = SourceDefinition(
         source_id="source_b",
@@ -87,7 +109,7 @@ def test_iter_estates_uses_enabled_configured_sources() -> None:
         rate_limit_seconds=0,
         max_pages_default=3,
         allowed_offer_types=("sale",),
-        allowed_property_types=("apartment",),
+        allowed_property_types=("mieszkanie",),
     )
 
     estates = list(
@@ -107,6 +129,46 @@ def test_iter_estates_uses_enabled_configured_sources() -> None:
     ]
     assert len(estates) == 1
     assert estates[0].source_id == "source_a"
+
+
+def test_iter_estates_skips_property_types_not_allowed_by_source() -> None:
+    requested_urls: list[str] = []
+
+    def fetcher(url: str) -> Mapping[str, Any]:
+        requested_urls.append(url)
+        return {"searchAds": {"items": []}}
+
+    source = SourceDefinition(
+        source_id="source_b",
+        adapter_type="html_listing_site",
+        enabled=True,
+        base_url="https://example-listing-site-2.local",
+        search_url_template=(
+            "https://example-listing-site-2.local/{property_type}/"
+            "{voivodeship}/?page={page}"
+        ),
+        rate_limit_seconds=0,
+        max_pages_default=3,
+        allowed_offer_types=("sale",),
+        allowed_property_types=("dom",),
+        property_type_mapping={"dom": "houses"},
+    )
+
+    estates = list(
+        iter_estates(
+            estate_types=("dom", "mieszkanie"),
+            voivodeships=("mazowieckie",),
+            max_page=1,
+            fetcher=fetcher,
+            detail_fetcher=None,
+            sources=(source,),
+        )
+    )
+
+    assert estates == []
+    assert requested_urls == [
+        "https://example-listing-site-2.local/houses/mazowieckie/?page=1"
+    ]
 
 
 def test_extract_next_data_from_html_parses_next_script() -> None:

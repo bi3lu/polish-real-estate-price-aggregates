@@ -33,6 +33,7 @@ class SourceDefinition(BaseModel):
     respect_robots_txt: bool = True
     allowed_offer_types: tuple[str, ...] = Field(default_factory=tuple)
     allowed_property_types: tuple[str, ...] = Field(default_factory=tuple)
+    property_type_mapping: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("source_id")
     @classmethod
@@ -96,6 +97,34 @@ class SourceDefinition(BaseModel):
             raise ValueError("allowed values must not be empty")
 
         return normalized_values
+
+    @field_validator("property_type_mapping", mode="before")
+    @classmethod
+    def normalize_property_type_mapping(cls, value: Any) -> dict[str, str]:
+        if value is None:
+            return {}
+
+        if not isinstance(value, dict):
+            raise ValueError("property_type_mapping must be an object")
+
+        normalized_mapping: dict[str, str] = {}
+
+        for raw_key, raw_value in value.items():
+            key = str(raw_key).strip()
+            mapped_value = str(raw_value).strip()
+
+            if not key or not mapped_value:
+                raise ValueError(
+                    "property_type_mapping keys and values must not be empty"
+                )
+
+            normalized_mapping[key] = mapped_value
+
+        return normalized_mapping
+
+    def source_property_type(self, property_type: str) -> str:
+        """Return the source-specific property slug for a canonical type."""
+        return self.property_type_mapping.get(property_type, property_type)
 
 
 class SourceConfig(BaseModel):
@@ -170,7 +199,8 @@ def _parse_supported_yaml(text: str) -> dict[str, Any]:
     """Parse the small YAML subset used by the public source config."""
     result: dict[str, Any] = {}
     current_source: dict[str, Any] | None = None
-    current_list_key: str | None = None
+    current_collection_key: str | None = None
+    current_collection_type: str | None = None
 
     for raw_line in text.splitlines():
         line_without_comment = raw_line.split("#", maxsplit=1)[0].rstrip()
@@ -183,7 +213,8 @@ def _parse_supported_yaml(text: str) -> dict[str, Any]:
         if stripped == "sources:":
             result["sources"] = []
             current_source = None
-            current_list_key = None
+            current_collection_key = None
+            current_collection_type = None
             continue
 
         if line_without_comment.startswith("  - "):
@@ -192,17 +223,36 @@ def _parse_supported_yaml(text: str) -> dict[str, Any]:
 
             current_source = {}
             result["sources"].append(current_source)
-            current_list_key = None
+            current_collection_key = None
+            current_collection_type = None
             key, value = _split_yaml_key_value(line_without_comment.strip()[2:])
             current_source[key] = _parse_yaml_scalar(value)
             continue
 
         if line_without_comment.startswith("      - "):
-            if current_source is None or current_list_key is None:
+            if (
+                current_source is None
+                or current_collection_key is None
+                or current_collection_type != "list"
+            ):
                 raise ValueError("YAML list item is missing a parent key")
 
-            current_source[current_list_key].append(
+            current_source[current_collection_key].append(
                 _parse_yaml_scalar(line_without_comment.strip()[1:].strip())
+            )
+            continue
+
+        if line_without_comment.startswith("      "):
+            if (
+                current_source is None
+                or current_collection_key is None
+                or current_collection_type != "dict"
+            ):
+                raise ValueError("YAML nested mapping item is missing a parent key")
+
+            nested_key, nested_value = _split_yaml_key_value(stripped)
+            current_source[current_collection_key][nested_key] = _parse_yaml_scalar(
+                nested_value
             )
             continue
 
@@ -214,12 +264,16 @@ def _parse_supported_yaml(text: str) -> dict[str, Any]:
         key, value = _split_yaml_key_value(stripped)
 
         if value == "":
-            current_source[key] = []
-            current_list_key = key
+            current_source[key] = {} if key == "property_type_mapping" else []
+            current_collection_key = key
+            current_collection_type = (
+                "dict" if key == "property_type_mapping" else "list"
+            )
             continue
 
         current_source[key] = _parse_yaml_scalar(value)
-        current_list_key = None
+        current_collection_key = None
+        current_collection_type = None
 
     return result
 

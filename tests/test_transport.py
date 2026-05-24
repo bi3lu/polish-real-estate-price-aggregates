@@ -180,6 +180,33 @@ def test_fetch_next_data_json_uses_exponential_retry_backoff(
     assert sleeps == [1, 2]
 
 
+def test_fetch_next_data_json_can_treat_html_without_next_data_as_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def urlopen(
+        request: urllib.request.Request,
+        *,
+        timeout: int,
+    ) -> _Response:
+        nonlocal calls
+        calls += 1
+        return _Response("<html><body>synthetic page</body></html>")
+
+    monkeypatch.setattr("src.ingestion.transport.urllib.request.urlopen", urlopen)
+
+    payload = fetch_next_data_json(
+        "https://example.invalid/listing",
+        retries=3,
+        throttle=None,
+        allow_missing_next_data=True,
+    )
+
+    assert payload == {}
+    assert calls == 1
+
+
 def _http_error(
     status_code: int,
     *,

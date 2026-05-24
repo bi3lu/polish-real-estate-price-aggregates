@@ -169,10 +169,13 @@ def build_listing_url(
         raise ValueError("page must be greater than or equal to 1")
 
     if source is not None:
+        source_property_type = source.source_property_type(estate_type)
         path_url = source.search_url_template.format(
             page=page,
-            estate_type=estate_type,
-            property_type=estate_type,
+            estate_type=source_property_type,
+            property_type=source_property_type,
+            canonical_estate_type=estate_type,
+            canonical_property_type=estate_type,
             voivodeship=voivodeship,
             source_id=source.source_id,
         )
@@ -258,6 +261,7 @@ def fetch_next_data_json(
     block_backoff_multiplier: float = REQUEST_BLOCK_BACKOFF_MULTIPLIER,
     block_jitter_seconds: float = REQUEST_BLOCK_JITTER_SECONDS,
     throttle: RequestThrottle | None = DEFAULT_REQUEST_THROTTLE,
+    allow_missing_next_data: bool = False,
 ) -> dict[str, Any]:
     """Fetch JSON or embedded Next.js data from a page.
 
@@ -308,7 +312,20 @@ def fetch_next_data_json(
 
                 return cast(dict[str, Any], parsed_json)
 
-            return extract_next_data_from_html(response_text)
+            try:
+                return extract_next_data_from_html(response_text)
+
+            except ValueError as exc:
+                if allow_missing_next_data and "Could not find __NEXT_DATA__" in str(
+                    exc
+                ):
+                    logger.warning(
+                        "No embedded listing data found for %s; treating page as empty",
+                        url,
+                    )
+                    return {}
+
+                raise
 
         except urllib.error.HTTPError as exc:
             last_error = exc

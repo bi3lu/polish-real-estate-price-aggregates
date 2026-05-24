@@ -50,6 +50,7 @@ sources:
     assert config.sources[0].max_pages_default == 3
     assert config.sources[0].allowed_offer_types == ("sale",)
     assert config.sources[0].allowed_property_types == ("apartment",)
+    assert config.sources[0].property_type_mapping == {}
 
 
 def test_source_config_rejects_duplicate_source_ids() -> None:
@@ -97,6 +98,29 @@ def test_source_config_applies_safe_defaults() -> None:
 
     assert config.sources[0].max_pages_default == 3
     assert config.sources[0].respect_robots_txt is True
+
+
+def test_source_config_supports_property_type_mapping() -> None:
+    payload = _source_payload("source_a")
+    payload["property_type_mapping"] = {
+        "apartment": "apartments",
+        "house": "houses",
+    }
+
+    config = SourceConfig.model_validate({"sources": [payload]})
+    source = config.sources[0]
+
+    assert source.source_property_type("apartment") == "apartments"
+    assert source.source_property_type("house") == "houses"
+    assert source.source_property_type("studio") == "studio"
+
+
+def test_source_config_rejects_invalid_property_type_mapping() -> None:
+    payload = _source_payload("source_a")
+    payload["property_type_mapping"] = ["apartment"]
+
+    with pytest.raises(ValidationError, match="property_type_mapping"):
+        SourceConfig.model_validate({"sources": [payload]})
 
 
 def _source_payload(source_id: str) -> dict[str, object]:

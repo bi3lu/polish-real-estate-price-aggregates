@@ -276,7 +276,11 @@ def iter_estates_for(
         if source_throttle is None or fetcher is not fetch_next_data_json:
             return fetcher(url)
 
-        return fetch_next_data_json(url, throttle=source_throttle)
+        return fetch_next_data_json(
+            url,
+            throttle=source_throttle,
+            allow_missing_next_data=_allow_missing_next_data(source_config),
+        )
 
     def fetch_detail_payload(url: str) -> Mapping[str, Any]:
         if detail_fetcher is None:
@@ -570,7 +574,7 @@ def iter_estates(
     )
 
     for source in selected_sources:
-        for estate_type in selected_estate_types:
+        for estate_type in _source_estate_types(source, selected_estate_types):
             for voivodeship in selected_voivodeships:
                 seen_ids = seen_ids_by_voivodeship.setdefault(voivodeship, set())
 
@@ -658,7 +662,7 @@ def iter_estates_threaded(
     ingestion_targets = tuple(
         (source, estate_type, voivodeship, shard)
         for source in selected_sources
-        for estate_type in selected_estate_types
+        for estate_type in _source_estate_types(source, selected_estate_types)
         for voivodeship in selected_voivodeships
         for shard in search_shards
     )
@@ -946,6 +950,26 @@ def _resolve_sources(
     )
 
 
+def _source_estate_types(
+    source: SourceInput,
+    estate_types: Iterable[str],
+) -> tuple[str, ...]:
+    selected_estate_types = tuple(estate_types)
+    source_config = _source_config(source)
+
+    if source_config is None or not source_config.allowed_property_types:
+        return selected_estate_types
+
+    allowed_property_types = set(source_config.allowed_property_types)
+
+    return tuple(
+        estate_type
+        for estate_type in selected_estate_types
+        if estate_type in allowed_property_types
+        or source_config.source_property_type(estate_type) in allowed_property_types
+    )
+
+
 def _source_id(source: SourceInput) -> str:
     if source is None:
         return DEFAULT_SOURCE_ID
@@ -978,6 +1002,13 @@ def _effective_max_page(
         limits.append(source_config.max_pages_default)
 
     return min(limits)
+
+
+def _allow_missing_next_data(source_config: SourceDefinition | None) -> bool:
+    return (
+        source_config is not None
+        and source_config.adapter_type == "html_listing_site"
+    )
 
 
 def _listing_dedupe_key(listing: RawListingObservation) -> str:

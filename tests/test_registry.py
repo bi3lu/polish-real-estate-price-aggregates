@@ -43,6 +43,27 @@ def test_build_adapters_uses_enabled_source_configs() -> None:
     ]
 
 
+def test_build_adapters_uses_source_property_type_mapping() -> None:
+    adapters = build_adapters(
+        (
+            _source_definition(
+                "source_a",
+                "embedded_json_listing_site",
+                True,
+                property_type_mapping={"mieszkanie": "apartments"},
+            ),
+        ),
+        property_types=("mieszkanie",),
+        voivodeships=("mazowieckie",),
+        max_pages=1,
+    )
+
+    assert adapters[0].build_search_urls() == [
+        "https://example-listing-site.local/search"
+        "?property=apartments&region=mazowieckie&page=1"
+    ]
+
+
 def test_build_adapters_fails_clearly_for_unknown_adapter_type() -> None:
     with pytest.raises(ValueError) as exc_info:
         build_adapters(
@@ -66,6 +87,7 @@ def _source_definition(
     source_id: str,
     adapter_type: str,
     enabled: bool,
+    property_type_mapping: dict[str, str] | None = None,
 ) -> SourceDefinition:
     return SourceDefinition(
         source_id=source_id,
@@ -80,4 +102,5 @@ def _source_definition(
         max_pages_default=3,
         allowed_offer_types=("sale",),
         allowed_property_types=("apartment",),
+        property_type_mapping=property_type_mapping or {},
     )

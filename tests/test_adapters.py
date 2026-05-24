@@ -83,13 +83,42 @@ def test_paginated_adapter_builds_configured_search_urls() -> None:
     ]
 
 
+def test_embedded_json_adapter_parses_results_payload_for_source_b() -> None:
+    adapter = EmbeddedJsonListingSourceAdapter(
+        config=_source_definition(
+            "embedded_json_listing_site",
+            source_id="source_b",
+        ),
+        property_types=("mieszkanie",),
+        voivodeships=("mazowieckie",),
+        max_pages=1,
+        fetcher=lambda url: _fixture_text("source_b", "listing_payload.json"),
+        processed_at=datetime(2026, 5, 23, 12, 0, tzinfo=timezone.utc),
+    )
+
+    listings = ingest_canonical_listings((adapter,))
+
+    assert len(listings) == 1
+    assert isinstance(listings[0], CanonicalListing)
+    assert listings[0].source_id == "source_b"
+    assert listings[0].record_id == "source_b:listing-b-json-002"
+    assert listings[0].title == "Synthetic JSON Result Listing"
+    assert listings[0].price_pln == 520000
+    assert listings[0].price_per_sqm_pln == 10400
+    assert listings[0].city == "Example Harbor"
+
+
 def _fixture_text(source_id: str, filename: str) -> str:
     return (FIXTURE_ROOT / source_id / filename).read_text(encoding="utf-8")
 
 
-def _source_definition(adapter_type: str) -> SourceDefinition:
+def _source_definition(
+    adapter_type: str,
+    *,
+    source_id: str = "source_a",
+) -> SourceDefinition:
     return SourceDefinition(
-        source_id="source_a",
+        source_id=source_id,
         adapter_type=adapter_type,
         enabled=True,
         base_url="https://example-listing-site.local",

@@ -160,6 +160,63 @@ Useful options:
 The command prints a JSON summary containing the manifest path, record count,
 selected filters, and enabled `source_id` values.
 
+## Docker
+
+The project includes a Docker image and Compose setup for long-running
+background ingestion. The image does not contain private source config or local
+pipeline data. Compose mounts:
+
+```text
+./config -> /app/config:ro
+./data   -> /app/data
+```
+
+Create `config/sources.local.yaml` first, then build and start the ingestion
+loop:
+
+```bash
+docker compose build
+docker compose up -d ingestion
+```
+
+Follow logs:
+
+```bash
+docker compose logs -f ingestion
+```
+
+Stop the background loop:
+
+```bash
+docker compose down
+```
+
+By default, the loop runs immediately and then every hour with:
+
+```text
+INGESTION_ARGS="--max-page 1 --workers 1"
+RUN_SILVER_ETL=true
+RUN_GOLD_ETL=false
+RUN_PUBLIC_ETL=false
+```
+
+Override runtime settings without editing source code:
+
+```bash
+INGESTION_INTERVAL_SECONDS=21600 \
+INGESTION_ARGS="--estate-type dom --voivodeship opolskie --max-page 2 --workers 1" \
+RUN_GOLD_ETL=true \
+docker compose up -d ingestion
+```
+
+Run a one-off containerized smoke ingestion:
+
+```bash
+docker compose run --rm ingestion-once
+```
+
+More detail: [docs/docker.md](docs/docker.md).
+
 ## Storage Layout
 
 Current bronze layout:

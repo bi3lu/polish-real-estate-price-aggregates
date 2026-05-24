@@ -1,0 +1,37 @@
+{
+  "searchAds": {
+    "items": [
+      {
+        "id": "listing-a-json-001",
+        "title": "Synthetic JSON Listing",
+        "slug": "synthetic-json-listing-IDjson001",
+        "totalPrice": {"value": "750 000", "currency": "PLN"},
+        "pricePerSquareMeter": "15 000 PLN",
+        "areaInSquareMeters": 50,
+        "characteristics": [
+          {"key": "rooms_num", "value": "THREE"},
+          {"key": "market", "value": "SECONDARY"},
+          {"key": "floor", "value": "2"},
+          {"key": "buildingType", "value": "BLOCK"}
+        ],
+        "location": {
+          "address": {
+            "city": "Example City",
+            "district": "Example District",
+            "street": "Example Street"
+          },
+          "coordinates": {
+            "latitude": 52.1,
+            "longitude": 21.2
+          }
+        },
+        "advertiserName": "Synthetic Seller",
+        "advertiserType": "AGENCY",
+        "images": [
+          {"url": "https://source-a.test/assets/listing-a-json-001-image-1.jpg"},
+          {"medium": "https://source-a.test/assets/listing-a-json-001-image-2.jpg"}
+        ]
+      }
+    ]
+  }
+}

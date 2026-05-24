@@ -3,6 +3,13 @@
 from __future__ import annotations
 
 from src.config.types import IngestionProgressCallback
+from src.ingestion.models import (
+    CanonicalListing,
+    RawListingObservation,
+    SourceQualityStats,
+    SourceRun,
+    SourceRunStats,
+)
 from src.ingestion.parsing import (
     extract_estate_detail,
     extract_listing_items,
@@ -11,8 +18,10 @@ from src.ingestion.parsing import (
 from src.ingestion.pipeline import (
     SearchShard,
     build_search_shards,
+    ingest_canonical_listings,
     ingest_estates,
     ingest_estates_for,
+    iter_canonical_listings,
     iter_estates,
     iter_estates_for,
     iter_estates_threaded,
@@ -38,11 +47,18 @@ __all__ = [
     "extract_next_data_from_html",
     "fetch_next_data_json",
     "get_estate_info",
+    "ingest_canonical_listings",
     "ingest_estates",
     "ingest_estates_for",
+    "iter_canonical_listings",
     "iter_estates",
     "iter_estates_for",
     "iter_estates_threaded",
+    "CanonicalListing",
+    "RawListingObservation",
+    "SourceQualityStats",
+    "SourceRun",
+    "SourceRunStats",
 ]
 
 logger = get_logger(__name__)

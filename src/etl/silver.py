@@ -16,8 +16,7 @@ from src.config.globals import (
     LIST_SEPARATOR,
     SILVER_DATA_DIR,
 )
-from src.models.estate import Estate
-from src.models.silver_estate import SilverEstate
+from src.ingestion.models import CanonicalListing, RawListingObservation
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -83,13 +82,20 @@ def find_latest_bronze_snapshot(bronze_dir: Path = BRONZE_DATA_DIR) -> Path:
     Raises:
         FileNotFoundError: If no bronze snapshots are present.
     """
-    canonical_manifest = bronze_dir / "estate_snapshot_manifest.json"
+    canonical_manifest = bronze_dir / "manifest.json"
 
     if canonical_manifest.exists():
         return canonical_manifest
 
+    legacy_manifest = bronze_dir / "estate_snapshot_manifest.json"
+
+    if legacy_manifest.exists():
+        return legacy_manifest
+
     snapshots = sorted(
         [
+            *bronze_dir.glob("*/*/manifest.json"),
+            *bronze_dir.glob("*/*/observations.jsonl"),
             *bronze_dir.glob("estate_snapshot_manifest_*.json"),
             *bronze_dir.glob("estate_snapshot_*.json"),
             *bronze_dir.glob("estate_snapshot_*.jsonl"),
@@ -181,6 +187,11 @@ def _find_canonical_voivodeship_snapshots(bronze_dir: Path) -> list[Path]:
     if not bronze_dir.exists():
         return snapshots
 
+    source_run_snapshots = sorted(bronze_dir.glob("*/*/observations.jsonl"))
+
+    if source_run_snapshots:
+        return source_run_snapshots
+
     for voivodeship_dir in sorted(
         path for path in bronze_dir.iterdir() if path.is_dir()
     ):
@@ -244,10 +255,16 @@ def _load_bronze_manifest(
         )
 
     for file_info in files.values():
-        if not isinstance(file_info, dict):
-            continue
+        path_value: Any
 
-        path_value = file_info.get("path")
+        if isinstance(file_info, str):
+            path_value = file_info
+
+        elif isinstance(file_info, dict):
+            path_value = file_info.get("path")
+
+        else:
+            continue
 
         if not isinstance(path_value, str):
             continue
@@ -316,7 +333,7 @@ def transform_bronze_payload(
     bronze_payload: dict[str, Any],
     *,
     processed_at: datetime | None = None,
-) -> list[SilverEstate]:
+) -> list[CanonicalListing]:
     """Transform a bronze payload into normalized silver records.
 
     Args:
@@ -324,7 +341,7 @@ def transform_bronze_payload(
         processed_at: Optional timestamp assigned to produced silver records.
 
     Returns:
-        Deduplicated silver records keyed by source and external listing id.
+        Deduplicated silver records keyed by source_id and external listing id.
 
     Raises:
         ValueError: If the bronze payload ``data`` field is not a list.
@@ -336,7 +353,7 @@ def transform_bronze_payload(
 
     snapshot_time = processed_at or datetime.now(timezone.utc)
     bronze_scraped_at = _normalize_text(bronze_payload.get("scraped_at"))
-    records_by_id: dict[str, SilverEstate] = {}
+    records_by_id: dict[str, CanonicalListing] = {}
 
     for raw_item in raw_items:
         if not isinstance(raw_item, dict):
@@ -344,7 +361,7 @@ def transform_bronze_payload(
             continue
 
         try:
-            bronze_estate = Estate.model_validate(raw_item)
+            bronze_estate = RawListingObservation.model_validate(raw_item)
 
         except ValidationError as exc:
             logger.warning("Skipping invalid bronze estate item: %s", exc)
@@ -366,11 +383,11 @@ def transform_bronze_payload(
 
 
 def normalize_estate(
-    estate: Estate,
+    estate: RawListingObservation,
     *,
     bronze_scraped_at: str | None = None,
     processed_at: datetime | None = None,
-) -> SilverEstate | None:
+) -> CanonicalListing | None:
     """Normalize one raw estate listing into the silver schema.
 
     Args:
@@ -384,7 +401,7 @@ def normalize_estate(
         external id.
     """
     snapshot_time = processed_at or datetime.now(timezone.utc)
-    source = _normalize_slug(estate.source) or "estate_service"
+    source_id = _normalize_slug(estate.source_id) or "source_a"
     external_id = _normalize_text(estate.external_id)
 
     if external_id is None:
@@ -416,9 +433,9 @@ def normalize_estate(
         city=estate.city,
     )
 
-    return SilverEstate(
-        record_id=f"{source}:{external_id}",
-        source=source,
+    return CanonicalListing(
+        record_id=f"{source_id}:{external_id}",
+        source_id=source_id,
         external_id=external_id,
         url=_normalize_text(estate.url),
         title=_normalize_text(estate.title),
@@ -515,7 +532,7 @@ def normalize_estate(
 
 
 def save_silver_snapshot(
-    records: list[SilverEstate],
+    records: list[CanonicalListing],
     *,
     output_dir: Path = SILVER_DATA_DIR,
     processed_at: datetime | None = None,
@@ -538,7 +555,7 @@ def save_silver_snapshot(
     with output_path.open("w", encoding="utf-8", newline="") as output_file:
         writer = csv.DictWriter(
             output_file,
-            fieldnames=list(SilverEstate.model_fields),
+            fieldnames=list(CanonicalListing.model_fields),
             extrasaction="raise",
         )
         writer.writeheader()
@@ -546,7 +563,43 @@ def save_silver_snapshot(
         for record in records:
             writer.writerow(_serialize_csv_row(record))
 
+    _save_canonical_listing_partitions(
+        records,
+        output_dir=output_dir,
+        processed_at=snapshot_time,
+    )
+
     return output_path
+
+
+def _save_canonical_listing_partitions(
+    records: list[CanonicalListing],
+    *,
+    output_dir: Path,
+    processed_at: datetime,
+) -> None:
+    month = processed_at.strftime("%Y-%m")
+    records_by_source: dict[str, list[CanonicalListing]] = {}
+
+    for record in records:
+        records_by_source.setdefault(record.source_id, []).append(record)
+
+    for source_id, source_records in sorted(records_by_source.items()):
+        partition_dir = (
+            output_dir
+            / "canonical_listings"
+            / f"source_id={source_id}"
+            / f"month={month}"
+        )
+        partition_dir.mkdir(parents=True, exist_ok=True)
+        output_path = partition_dir / "listings.jsonl"
+
+        with output_path.open("w", encoding="utf-8") as output_file:
+            for record in source_records:
+                output_file.write(
+                    json.dumps(record.model_dump(mode="json"), ensure_ascii=False)
+                    + "\n"
+                )
 
 
 def _build_silver_filename(processed_at: datetime) -> str:
@@ -554,7 +607,7 @@ def _build_silver_filename(processed_at: datetime) -> str:
     return f"estate_silver_{timestamp}.csv"
 
 
-def _serialize_csv_row(record: SilverEstate) -> dict[str, Any]:
+def _serialize_csv_row(record: CanonicalListing) -> dict[str, Any]:
     row = record.model_dump(mode="json")
 
     return {key: _serialize_csv_value(value) for key, value in row.items()}

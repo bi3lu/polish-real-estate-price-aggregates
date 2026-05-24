@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -26,9 +27,12 @@ from src.config.globals import (
     REQUEST_BLOCK_RETRIES,
     REQUEST_BLOCK_STATUS_CODES,
     REQUEST_RETRIES,
+    REQUEST_RETRY_BACKOFF_MULTIPLIER,
+    REQUEST_RETRY_MAX_SLEEP_SECONDS,
     REQUEST_RETRY_SLEEP_SECONDS,
     REQUEST_TIMEOUT_SECONDS,
 )
+from src.config.source_config import SourceDefinition
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -56,9 +60,11 @@ class SourceBlockedError(RuntimeError):
 class RequestThrottle:
     """Shared cooldown gate used by concurrent request workers."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, rate_limit_seconds: float = 0.0) -> None:
         self._lock = Lock()
         self._blocked_until = 0.0
+        self._next_allowed_at = 0.0
+        self._rate_limit_seconds = max(0.0, rate_limit_seconds)
 
     def wait_if_needed(self) -> None:
         """Sleep while a source-wide cooldown is active."""
@@ -67,12 +73,26 @@ class RequestThrottle:
                 sleep_seconds = self._blocked_until - time.monotonic()
 
             if sleep_seconds <= 0:
-                return
+                break
 
             logger.warning(
                 "Source cooldown active; sleeping %.1f seconds before next request",
                 sleep_seconds,
             )
+            time.sleep(sleep_seconds)
+
+        if self._rate_limit_seconds <= 0:
+            return
+
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                sleep_seconds = self._next_allowed_at - now
+
+                if sleep_seconds <= 0:
+                    self._next_allowed_at = now + self._rate_limit_seconds
+                    return
+
             time.sleep(sleep_seconds)
 
     def register_block(self, cooldown_seconds: float) -> None:
@@ -129,6 +149,7 @@ def build_listing_url(
     page: int = 1,
     main_url: str = MAIN_URL,
     query_params: Mapping[str, str] | None = None,
+    source: SourceDefinition | None = None,
 ) -> str:
     """Build a listing URL for a sale search page.
 
@@ -148,6 +169,19 @@ def build_listing_url(
     if page < 1:
         raise ValueError("page must be greater than or equal to 1")
 
+    if source is not None:
+        source_property_type = source.source_property_type(estate_type)
+        path_url = source.search_url_template.format(
+            page=page,
+            estate_type=source_property_type,
+            property_type=source_property_type,
+            canonical_estate_type=estate_type,
+            canonical_property_type=estate_type,
+            voivodeship=voivodeship,
+            source_id=source.source_id,
+        )
+        return _append_query_params(path_url, query_params)
+
     base_url = main_url.rstrip("/") + "/"
     path_url = urllib.parse.urljoin(base_url, f"{estate_type}/{voivodeship}")
     query_values = {
@@ -158,6 +192,31 @@ def build_listing_url(
     query = urllib.parse.urlencode(query_values)
 
     return f"{path_url}?{query}"
+
+
+def _append_query_params(
+    url: str,
+    query_params: Mapping[str, str] | None,
+) -> str:
+    if not query_params:
+        return url
+
+    parsed_url = urllib.parse.urlsplit(url)
+    existing_query_values = urllib.parse.parse_qsl(
+        parsed_url.query,
+        keep_blank_values=True,
+    )
+    query = urllib.parse.urlencode([*existing_query_values, *query_params.items()])
+
+    return urllib.parse.urlunsplit(
+        (
+            parsed_url.scheme,
+            parsed_url.netloc,
+            parsed_url.path,
+            query,
+            parsed_url.fragment,
+        )
+    )
 
 
 def extract_next_data_from_html(html_content: str) -> dict[str, Any]:
@@ -187,6 +246,28 @@ def extract_next_data_from_html(html_content: str) -> dict[str, Any]:
     return cast(dict[str, Any], parsed_json)
 
 
+_PRERENDERED_STATE_RE = re.compile(
+    r"window\.__PRERENDERED_STATE__\s*=\s*(\"(?:\\.|[^\"\\])*\")\s*;",
+    re.DOTALL,
+)
+
+
+def extract_prerendered_state_from_html(html_content: str) -> dict[str, Any]:
+    """Extract a JSON state object embedded as a JavaScript string literal."""
+    match = _PRERENDERED_STATE_RE.search(html_content)
+
+    if match is None:
+        raise ValueError("Could not find embedded prerendered state in response HTML")
+
+    state_text = json.loads(match.group(1))
+    parsed_state = json.loads(state_text)
+
+    if not isinstance(parsed_state, dict):
+        raise ValueError("Prerendered state JSON root is not an object")
+
+    return cast(dict[str, Any], parsed_state)
+
+
 def fetch_next_data_json(
     url: str,
     *,
@@ -194,6 +275,8 @@ def fetch_next_data_json(
     timeout_seconds: int = REQUEST_TIMEOUT_SECONDS,
     retries: int = REQUEST_RETRIES,
     retry_sleep_seconds: float = REQUEST_RETRY_SLEEP_SECONDS,
+    retry_backoff_multiplier: float = REQUEST_RETRY_BACKOFF_MULTIPLIER,
+    retry_max_sleep_seconds: float = REQUEST_RETRY_MAX_SLEEP_SECONDS,
     block_status_codes: frozenset[int] = REQUEST_BLOCK_STATUS_CODES,
     block_retries: int = REQUEST_BLOCK_RETRIES,
     block_cooldown_seconds: float = REQUEST_BLOCK_COOLDOWN_SECONDS,
@@ -201,6 +284,7 @@ def fetch_next_data_json(
     block_backoff_multiplier: float = REQUEST_BLOCK_BACKOFF_MULTIPLIER,
     block_jitter_seconds: float = REQUEST_BLOCK_JITTER_SECONDS,
     throttle: RequestThrottle | None = DEFAULT_REQUEST_THROTTLE,
+    allow_missing_next_data: bool = False,
 ) -> dict[str, Any]:
     """Fetch JSON or embedded Next.js data from a page.
 
@@ -210,6 +294,8 @@ def fetch_next_data_json(
         timeout_seconds: Socket timeout in seconds.
         retries: Number of request attempts.
         retry_sleep_seconds: Delay between failed attempts.
+        retry_backoff_multiplier: Exponential backoff multiplier for retries.
+        retry_max_sleep_seconds: Maximum delay between failed attempts.
         block_status_codes: HTTP status codes treated as source throttling.
         block_retries: Number of cooldown attempts allowed for source blocks.
         block_cooldown_seconds: Initial cooldown for source block responses.
@@ -249,7 +335,25 @@ def fetch_next_data_json(
 
                 return cast(dict[str, Any], parsed_json)
 
-            return extract_next_data_from_html(response_text)
+            try:
+                return extract_next_data_from_html(response_text)
+
+            except ValueError as exc:
+                if "Could not find __NEXT_DATA__" not in str(exc):
+                    raise
+
+            try:
+                return extract_prerendered_state_from_html(response_text)
+
+            except ValueError as exc:
+                if allow_missing_next_data and "Could not find embedded" in str(exc):
+                    logger.warning(
+                        "No embedded listing data found for %s; treating page as empty",
+                        url,
+                    )
+                    return {}
+
+                raise
 
         except urllib.error.HTTPError as exc:
             last_error = exc
@@ -304,7 +408,14 @@ def fetch_next_data_json(
             )
 
             if attempt < retries:
-                time.sleep(retry_sleep_seconds)
+                time.sleep(
+                    _retry_sleep_seconds(
+                        attempt=attempt,
+                        base_seconds=retry_sleep_seconds,
+                        backoff_multiplier=retry_backoff_multiplier,
+                        max_seconds=retry_max_sleep_seconds,
+                    )
+                )
 
         except (
             TimeoutError,
@@ -322,7 +433,14 @@ def fetch_next_data_json(
             )
 
             if attempt < retries:
-                time.sleep(retry_sleep_seconds)
+                time.sleep(
+                    _retry_sleep_seconds(
+                        attempt=attempt,
+                        base_seconds=retry_sleep_seconds,
+                        backoff_multiplier=retry_backoff_multiplier,
+                        max_seconds=retry_max_sleep_seconds,
+                    )
+                )
 
     raise RuntimeError(f"Could not fetch listing data for {url}") from last_error
 
@@ -348,6 +466,21 @@ def _block_cooldown_seconds(
         cooldown_seconds += random.uniform(0, jitter_seconds)
 
     return max(0.0, min(cooldown_seconds, max_seconds))
+
+
+def _retry_sleep_seconds(
+    *,
+    attempt: int,
+    base_seconds: float,
+    backoff_multiplier: float,
+    max_seconds: float,
+) -> float:
+    if base_seconds <= 0:
+        return 0.0
+
+    multiplier = max(1.0, backoff_multiplier)
+    sleep_seconds = base_seconds * (multiplier ** max(attempt - 1, 0))
+    return max(0.0, min(sleep_seconds, max_seconds))
 
 
 def _retry_after_seconds(exc: urllib.error.HTTPError) -> float | None:

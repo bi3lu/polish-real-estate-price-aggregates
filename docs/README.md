@@ -1,23 +1,28 @@
-# Project Diagrams
+# Documentation
 
-This directory contains Mermaid diagrams describing the main architecture and
-runtime flows of the Polish Real Estate Price Aggregates project.
+This directory contains architecture notes and Mermaid diagrams for the current
+source-neutral ingestion and ETL pipeline.
 
-## Diagrams
+## Contents
 
-- [System Context](system-context.md) - high-level actors, source service, local
-  pipeline, and public outputs.
-- [Data Pipeline](data-pipeline.md) - bronze, silver, gold, and public data
-  layers.
-- [Component Diagram](component-diagram.md) - main Python packages, shared
-  config/type modules, ingestion internals, and their dependencies.
-- [Ingestion Sequence](ingestion-sequence.md) - command-line ingestion flow with
-  resume checkpoints.
-- [ETL Sequence](etl-sequence.md) - transformation flow from bronze to public
-  datasets.
-- [Data Model Overview](data-model-overview.md) - core Pydantic models and
-  generated table groups.
-- [Market Ranking CLI](market-ranking.md) - public-dataset ranking commands for
-  regional and segment-level market analysis.
+- [System Context](system-context.md) - actors, local source config, private
+  storage, public exports, and CI.
+- [Source Configuration](source-configuration.md) - YAML source definitions,
+  adapter registry, property type mapping, and local/private config rules.
+- [Docker](docker.md) - container image, Compose background loop, volumes, and
+  runtime variables.
+- [Data Pipeline](data-pipeline.md) - bronze, silver, gold, public, and
+  analytics layers.
+- [Component Diagram](component-diagram.md) - Python modules and their
+  dependencies.
+- [Ingestion Sequence](ingestion-sequence.md) - CLI ingestion, dynamic adapter
+  creation, pagination, sharding, and manifests.
+- [ETL Sequence](etl-sequence.md) - bronze to silver to gold to public.
+- [Data Model Overview](data-model-overview.md) - neutral domain models and
+  downstream table groups.
+- [Market Ranking CLI](market-ranking.md) - analytical rankings from public
+  exports.
+- [Ethics and Responsible Collection](ethics.md) - rules for low-impact,
+  lawful, non-evasive collection.
 
 GitHub renders Mermaid blocks directly in Markdown files.

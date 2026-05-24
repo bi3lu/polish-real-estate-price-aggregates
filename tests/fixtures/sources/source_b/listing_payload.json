@@ -1,0 +1,33 @@
+{
+  "data": {
+    "results": [
+      {
+        "adId": "listing-b-json-002",
+        "headline": "Synthetic JSON Result Listing",
+        "link": "/d/oferta/synthetic-json-result-listing-IDb002",
+        "price": {
+          "amount": 520000
+        },
+        "price_per_sqm": 10400,
+        "surface": 50,
+        "numberOfRooms": "TWO",
+        "location": {
+          "locations": [
+            {
+              "locationLevel": "city",
+              "name": "Example Harbor"
+            },
+            {
+              "locationLevel": "district",
+              "name": "Example East"
+            }
+          ]
+        },
+        "owner": {
+          "name": "Synthetic Owner",
+          "type": "OWNER"
+        }
+      }
+    ]
+  }
+}

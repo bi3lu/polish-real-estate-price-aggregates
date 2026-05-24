@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
-from src.config.env import normalize_url
 from src.config.globals import ESTATE_URL, MAIN_URL
+from src.config.source_config import SourceDefinition
 from src.ingestion.estate_ingestion import (
     build_listing_url,
     build_search_shards,
@@ -18,11 +20,7 @@ from src.ingestion.estate_ingestion import (
     iter_estates,
 )
 
-
-def test_normalize_url() -> None:
-    assert normalize_url("  https://example.invalid/results/") == (
-        "https://example.invalid/results/"
-    )
+FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sources"
 
 
 def test_build_listing_url_uses_estate_type_voivodeship_and_page() -> None:
@@ -50,18 +48,198 @@ def test_build_listing_url_accepts_search_query_params() -> None:
     assert query["search[filter_float_price:to]"] == ["400000"]
 
 
+def test_build_listing_url_uses_source_property_type_mapping() -> None:
+    source = SourceDefinition(
+        source_id="source_b",
+        adapter_type="html_listing_site",
+        enabled=True,
+        base_url="https://example-listing-site-2.local",
+        search_url_template=(
+            "https://example-listing-site-2.local/{property_type}/"
+            "{voivodeship}/?page={page}"
+        ),
+        rate_limit_seconds=0,
+        max_pages_default=3,
+        allowed_offer_types=("sale",),
+        allowed_property_types=("house",),
+        property_type_mapping={"house": "houses"},
+    )
+
+    assert build_listing_url("house", "example-region", page=1, source=source) == (
+        "https://example-listing-site-2.local/houses/example-region/?page=1"
+    )
+
+
+def test_iter_estates_uses_enabled_configured_sources() -> None:
+    requested_urls: list[str] = []
+
+    def fetcher(url: str) -> Mapping[str, Any]:
+        requested_urls.append(url)
+        return {
+            "searchAds": {
+                "items": [
+                    {
+                        "id": "listing-1",
+                        "title": "Synthetic Config Listing",
+                    }
+                ]
+            }
+        }
+
+    source_a = SourceDefinition(
+        source_id="source_a",
+        adapter_type="embedded_json_listing_site",
+        enabled=True,
+        base_url="https://example-listing-site.local",
+        search_url_template=(
+            "https://example-listing-site.local/search"
+            "?property={property_type}&region={voivodeship}&page={page}"
+        ),
+        rate_limit_seconds=0,
+        max_pages_default=3,
+        allowed_offer_types=("sale",),
+        allowed_property_types=("mieszkanie",),
+    )
+    source_b = SourceDefinition(
+        source_id="source_b",
+        adapter_type="html_listing_site",
+        enabled=False,
+        base_url="https://example-listing-site-2.local",
+        search_url_template="https://example-listing-site-2.local/offers?page={page}",
+        rate_limit_seconds=0,
+        max_pages_default=3,
+        allowed_offer_types=("sale",),
+        allowed_property_types=("mieszkanie",),
+    )
+
+    estates = list(
+        iter_estates(
+            estate_types=("mieszkanie",),
+            voivodeships=("mazowieckie",),
+            max_page=1,
+            fetcher=fetcher,
+            detail_fetcher=None,
+            sources=(source_a, source_b),
+        )
+    )
+
+    assert requested_urls == [
+        "https://example-listing-site.local/search"
+        "?property=mieszkanie&region=mazowieckie&page=1"
+    ]
+    assert len(estates) == 1
+    assert estates[0].source_id == "source_a"
+
+
+def test_iter_estates_skips_property_types_not_allowed_by_source() -> None:
+    requested_urls: list[str] = []
+
+    def fetcher(url: str) -> Mapping[str, Any]:
+        requested_urls.append(url)
+        return {"searchAds": {"items": []}}
+
+    source = SourceDefinition(
+        source_id="source_b",
+        adapter_type="html_listing_site",
+        enabled=True,
+        base_url="https://example-listing-site-2.local",
+        search_url_template=(
+            "https://example-listing-site-2.local/{property_type}/"
+            "{voivodeship}/?page={page}"
+        ),
+        rate_limit_seconds=0,
+        max_pages_default=3,
+        allowed_offer_types=("sale",),
+        allowed_property_types=("dom",),
+        property_type_mapping={"dom": "houses"},
+    )
+
+    estates = list(
+        iter_estates(
+            estate_types=("dom", "mieszkanie"),
+            voivodeships=("mazowieckie",),
+            max_page=1,
+            fetcher=fetcher,
+            detail_fetcher=None,
+            sources=(source,),
+        )
+    )
+
+    assert estates == []
+    assert requested_urls == [
+        "https://example-listing-site-2.local/houses/mazowieckie/?page=1"
+    ]
+
+
+def test_iter_estates_does_not_fetch_details_for_html_sources() -> None:
+    detail_urls: list[str] = []
+
+    def fetcher(url: str) -> Mapping[str, Any]:
+        return {
+            "listing": {
+                "listing": {
+                    "ads": [
+                        {
+                            "id": "listing-1",
+                            "title": "Synthetic HTML Listing",
+                            "url": (
+                                "https://example-listing-site-2.local/"
+                                "synthetic-html-listing-ID1.html"
+                            ),
+                            "price": {"regularPrice": {"value": 430000}},
+                            "location": {"cityName": "Example City"},
+                        }
+                    ]
+                }
+            }
+        }
+
+    def detail_fetcher(url: str) -> Mapping[str, Any]:
+        detail_urls.append(url)
+        return {}
+
+    source = SourceDefinition(
+        source_id="source_b",
+        adapter_type="html_listing_site",
+        enabled=True,
+        base_url="https://example-listing-site-2.local",
+        search_url_template=(
+            "https://example-listing-site-2.local/{property_type}/"
+            "{voivodeship}/?page={page}"
+        ),
+        rate_limit_seconds=0,
+        max_pages_default=1,
+        allowed_offer_types=("sale",),
+        allowed_property_types=("dom",),
+        property_type_mapping={"dom": "houses"},
+    )
+
+    estates = list(
+        iter_estates(
+            estate_types=("dom",),
+            voivodeships=("mazowieckie",),
+            max_page=1,
+            fetcher=fetcher,
+            detail_fetcher=detail_fetcher,
+            sources=(source,),
+        )
+    )
+
+    assert [estate.external_id for estate in estates] == ["listing-1"]
+    assert estates[0].city == "Example City"
+    assert detail_urls == []
+
+
 def test_extract_next_data_from_html_parses_next_script() -> None:
-    html = """
-    <html>
-      <script id="__NEXT_DATA__" type="application/json">
-        {"props": {"pageProps": {"data": {"searchAds": {"items": [{"id": 1}]}}}}}
-      </script>
-    </html>
-    """
+    html = _fixture_text("source_a", "search_page.html")
 
     next_data_json = extract_next_data_from_html(html)
 
-    assert extract_listing_items(next_data_json) == [{"id": 1}]
+    listing_items = extract_listing_items(next_data_json)
+
+    assert len(listing_items) == 2
+    assert listing_items[0]["id"] == "listing-a-001"
+    assert listing_items[0]["title"] == "Synthetic Fixture Listing A"
 
 
 def test_extract_listing_items_supports_next_data_json_variant() -> None:
@@ -97,11 +275,14 @@ def test_extract_listing_items_supports_nested_query_cache_shape() -> None:
                                         "items": [
                                             {
                                                 "id": "first",
-                                                "title": "Oferta z cache",
+                                                "title": "Synthetic Cached Listing",
                                             },
                                             {
                                                 "id": "second",
-                                                "href": "[lang]/ad/oferta-ID4abc",
+                                                "href": (
+                                                    "[lang]/ad/"
+                                                    "synthetic-cached-listing-ID4abc"
+                                                ),
                                             },
                                         ]
                                     }
@@ -115,73 +296,44 @@ def test_extract_listing_items_supports_nested_query_cache_shape() -> None:
     }
 
     assert extract_listing_items(next_data_json) == [
-        {"id": "first", "title": "Oferta z cache"},
-        {"id": "second", "href": "[lang]/ad/oferta-ID4abc"},
+        {"id": "first", "title": "Synthetic Cached Listing"},
+        {
+            "id": "second",
+            "href": "[lang]/ad/synthetic-cached-listing-ID4abc",
+        },
     ]
 
 
 def test_get_estate_info_maps_wide_listing_snapshot() -> None:
-    image_one_url = f"{ESTATE_URL.rstrip('/')}/image-one.jpg"
-    image_two_url = f"{ESTATE_URL.rstrip('/')}/image-two.jpg"
+    payload = _fixture_json("source_a", "listing_payload.json")
+    listing_item = payload["searchAds"]["items"][0]
 
     estate = get_estate_info(
-        {
-            "id": "ABC123",
-            "title": "Jasne mieszkanie z balkonem",
-            "slug": "jasne-mieszkanie-z-balkonem-IDABC123",
-            "totalPrice": {"value": "750 000 zł"},
-            "pricePerSquareMeter": "15 000 zł/m²",
-            "areaInSquareMeters": 50,
-            "characteristics": [
-                {"key": "rooms_num", "value": "THREE"},
-                {"key": "market", "value": "SECONDARY"},
-                {"key": "floor", "value": "2"},
-                {"key": "buildingType", "value": "BLOCK"},
-            ],
-            "location": {
-                "address": {
-                    "city": "Warszawa",
-                    "district": "Mokotów",
-                    "street": "Puławska",
-                },
-                "coordinates": {
-                    "latitude": 52.189,
-                    "longitude": 21.012,
-                },
-            },
-            "advertiserName": "Biuro Testowe",
-            "advertiserType": "AGENCY",
-            "images": [
-                {"url": image_one_url},
-                {"medium": image_two_url},
-            ],
-        },
+        listing_item,
         estate_type="mieszkanie",
         voivodeship="mazowieckie",
     )
 
     assert estate is not None
-    assert estate.external_id == "ABC123"
-    assert estate.url == (
-        f"{ESTATE_URL.rstrip('/')}/jasne-mieszkanie-z-balkonem-IDABC123"
-    )
+    assert estate.external_id == "listing-a-json-001"
+    assert estate.url == f"{ESTATE_URL.rstrip('/')}/synthetic-json-listing-IDjson001"
     assert estate.price == 750000
     assert estate.price_per_sqm == 15000
     assert estate.area_sqm == 50
     assert estate.rooms == 3
-    assert estate.city == "Warszawa"
-    assert estate.district == "Mokotów"
-    assert estate.street == "Puławska"
+    assert estate.city == "Example City"
+    assert estate.district == "Example District"
+    assert estate.street == "Example Street"
     assert estate.market == "SECONDARY"
     assert estate.floor == 2
     assert estate.building_type == "BLOCK"
-    assert estate.seller_name == "Biuro Testowe"
+    assert estate.seller_name == "Synthetic Seller"
     assert estate.seller_type == "AGENCY"
-    assert estate.latitude == 52.189
-    assert estate.longitude == 21.012
+    assert estate.latitude == 52.1
+    assert estate.longitude == 21.2
     assert estate.images == [
-        image_one_url,
-        image_two_url,
+        "https://source-a.test/assets/listing-a-json-001-image-1.jpg",
+        "https://source-a.test/assets/listing-a-json-001-image-2.jpg",
     ]
 
 
@@ -189,8 +341,8 @@ def test_get_estate_info_maps_nested_location_objects() -> None:
     estate = get_estate_info(
         {
             "id": 68001411,
-            "title": "2 pokoje",
-            "href": "[lang]/ad/2-pokoje-ID4BkgX",
+            "title": "Synthetic Nested Location Listing",
+            "href": "[lang]/ad/synthetic-nested-location-ID4BkgX",
             "totalPrice": {"value": 700000, "currency": "PLN"},
             "pricePerSquareMeter": {"value": 15419, "currency": "PLN"},
             "areaInSquareMeters": 45.4,
@@ -198,8 +350,8 @@ def test_get_estate_info_maps_nested_location_objects() -> None:
             "floorNumber": "FIRST",
             "location": {
                 "address": {
-                    "street": {"name": "Żytnia", "number": ""},
-                    "city": {"name": "Warszawa"},
+                    "street": {"name": "Example Street", "number": ""},
+                    "city": {"name": "Example City"},
                     "province": {"name": "mazowieckie"},
                 },
                 "reverseGeocoding": {
@@ -211,15 +363,15 @@ def test_get_estate_info_maps_nested_location_objects() -> None:
                             "locationLevel": "voivodeship",
                         },
                         {
-                            "id": "mazowieckie/warszawa",
-                            "fullName": "Warszawa, mazowieckie",
-                            "name": "Warszawa",
+                            "id": "mazowieckie/example-city",
+                            "fullName": "Example City, mazowieckie",
+                            "name": "Example City",
                             "locationLevel": "city_or_village",
                         },
                         {
-                            "id": "mazowieckie/warszawa/wola",
-                            "fullName": "Wola, Warszawa, mazowieckie",
-                            "name": "Wola",
+                            "id": "mazowieckie/example-city/example-district",
+                            "fullName": ("Example District, Example City, mazowieckie"),
+                            "name": "Example District",
                             "locationLevel": "district",
                         },
                     ]
@@ -231,10 +383,10 @@ def test_get_estate_info_maps_nested_location_objects() -> None:
     )
 
     assert estate is not None
-    assert estate.city == "Warszawa"
-    assert estate.district == "Wola"
-    assert estate.street == "Żytnia"
-    assert estate.location == "Żytnia, Wola, Warszawa"
+    assert estate.city == "Example City"
+    assert estate.district == "Example District"
+    assert estate.street == "Example Street"
+    assert estate.location == "Example Street, Example District, Example City"
     assert estate.price == 700000
     assert estate.price_per_sqm == 15419
     assert estate.area_sqm == 45.4
@@ -253,7 +405,7 @@ def test_ingest_estates_for_stops_after_empty_page() -> None:
                             "items": [
                                 {
                                     "id": "first",
-                                    "title": "Pierwsza oferta",
+                                    "title": "Synthetic First Listing",
                                 }
                             ]
                         }
@@ -294,7 +446,7 @@ def test_ingest_estates_for_stops_after_duplicate_page() -> None:
                             "items": [
                                 {
                                     "id": "repeated",
-                                    "title": "Pierwsza oferta",
+                                    "title": "Synthetic First Listing",
                                 }
                             ]
                         }
@@ -310,7 +462,7 @@ def test_ingest_estates_for_stops_after_duplicate_page() -> None:
                             "items": [
                                 {
                                     "id": "repeated",
-                                    "title": "Ta sama oferta",
+                                    "title": "Synthetic Duplicate Listing",
                                 }
                             ]
                         }
@@ -326,7 +478,7 @@ def test_ingest_estates_for_stops_after_duplicate_page() -> None:
                             "items": [
                                 {
                                     "id": "should-not-be-fetched",
-                                    "title": "Kolejna oferta",
+                                    "title": "Synthetic Later Listing",
                                 }
                             ]
                         }
@@ -381,7 +533,7 @@ def test_ingest_estates_for_resume_continues_past_duplicate_pages() -> None:
                             "items": [
                                 {
                                     "id": listing_id,
-                                    "title": f"Oferta {listing_id}",
+                                    "title": f"Synthetic Listing {listing_id}",
                                 }
                             ]
                         }
@@ -422,7 +574,7 @@ def test_ingest_estates_for_resume_stops_after_duplicate_page_threshold() -> Non
                             "items": [
                                 {
                                     "id": listing_id,
-                                    "title": "Stara oferta",
+                                    "title": "Synthetic Existing Listing",
                                 }
                             ]
                         }
@@ -466,7 +618,7 @@ def test_ingest_estates_for_resumes_from_start_page_and_reports_progress() -> No
                             "items": [
                                 {
                                     "id": "new-listing",
-                                    "title": "Nowa oferta",
+                                    "title": "Synthetic New Listing",
                                 }
                             ]
                         }
@@ -519,7 +671,7 @@ def test_iter_estates_uses_price_shards_and_shard_checkpoints() -> None:
                             "items": [
                                 {
                                     "id": listing_id,
-                                    "title": f"Oferta {listing_id}",
+                                    "title": f"Synthetic Listing {listing_id}",
                                 }
                             ]
                         }
@@ -577,7 +729,7 @@ def test_iter_estates_supports_worker_threads() -> None:
                             "items": [
                                 {
                                     "id": listing_id,
-                                    "title": f"Oferta {voivodeship}",
+                                    "title": f"Synthetic Listing {voivodeship}",
                                 }
                             ]
                         }
@@ -618,13 +770,15 @@ def test_iter_estates_skips_existing_external_ids_before_detail_fetch() -> None:
                             "items": [
                                 {
                                     "id": "already-seen",
-                                    "title": "Stara oferta",
-                                    "href": "[lang]/ad/stara-oferta-ID4old",
+                                    "title": "Synthetic Existing Listing",
+                                    "href": (
+                                        "[lang]/ad/synthetic-existing-listing-ID4old"
+                                    ),
                                 },
                                 {
                                     "id": "new-listing",
-                                    "title": "Nowa oferta",
-                                    "href": "[lang]/ad/nowa-oferta-ID4new",
+                                    "title": "Synthetic New Listing",
+                                    "href": "[lang]/ad/synthetic-new-listing-ID4new",
                                 },
                             ]
                         }
@@ -640,7 +794,7 @@ def test_iter_estates_skips_existing_external_ids_before_detail_fetch() -> None:
                 "pageProps": {
                     "ad": {
                         "id": "new-listing",
-                        "title": "Nowa oferta",
+                        "title": "Synthetic New Listing",
                     }
                 }
             }
@@ -661,7 +815,7 @@ def test_iter_estates_skips_existing_external_ids_before_detail_fetch() -> None:
     )
 
     assert [estate.external_id for estate in estates] == ["new-listing"]
-    assert detail_urls == [f"{ESTATE_URL.rstrip('/')}/nowa-oferta-ID4new"]
+    assert detail_urls == [f"{ESTATE_URL.rstrip('/')}/synthetic-new-listing-ID4new"]
 
 
 def test_ingest_estates_for_enriches_listing_with_detail_page() -> None:
@@ -674,8 +828,8 @@ def test_ingest_estates_for_enriches_listing_with_detail_page() -> None:
                         "items": [
                             {
                                 "id": "67792619",
-                                "title": "Pięknie położony dom",
-                                "href": "[lang]/ad/pieknie-polozony-dom-ID4ArXl",
+                                "title": "Synthetic Detail Listing",
+                                "href": "[lang]/ad/synthetic-detail-listing-ID4ArXl",
                                 "totalPrice": {"value": 2600000},
                             }
                         ]
@@ -695,7 +849,7 @@ def test_ingest_estates_for_enriches_listing_with_detail_page() -> None:
                 "pageProps": {
                     "ad": {
                         "id": 67792619,
-                        "slug": "pieknie-polozony-dom-ID4ArXl",
+                        "slug": "synthetic-detail-listing-ID4ArXl",
                         "market": "SECONDARY",
                         "advertType": "AGENCY",
                         "target": {
@@ -707,13 +861,13 @@ def test_ingest_estates_for_enriches_listing_with_detail_page() -> None:
                                 "longitude": 21.075463,
                             },
                             "address": {
-                                "city": {"name": "Serock"},
+                                "city": {"name": "Example Detail City"},
                                 "street": None,
                                 "district": None,
                             },
                         },
                         "agency": {
-                            "name": "Magiczny Dom",
+                            "name": "Synthetic Seller",
                             "type": "agency",
                         },
                     }
@@ -730,14 +884,14 @@ def test_ingest_estates_for_enriches_listing_with_detail_page() -> None:
     )
 
     assert requested_detail_urls == [
-        f"{ESTATE_URL.rstrip('/')}/pieknie-polozony-dom-ID4ArXl"
+        f"{ESTATE_URL.rstrip('/')}/synthetic-detail-listing-ID4ArXl"
     ]
     assert len(estates) == 1
-    assert estates[0].city == "Serock"
-    assert estates[0].location == "Serock"
+    assert estates[0].city == "Example Detail City"
+    assert estates[0].location == "Example Detail City"
     assert estates[0].market == "SECONDARY"
     assert estates[0].building_type == "detached"
-    assert estates[0].seller_name == "Magiczny Dom"
+    assert estates[0].seller_name == "Synthetic Seller"
     assert estates[0].seller_type == "agency"
     assert estates[0].latitude == 52.5200528
     assert estates[0].longitude == 21.075463
@@ -753,8 +907,11 @@ def test_ingest_estates_for_normalizes_prefixed_detail_url() -> None:
                         "items": [
                             {
                                 "id": "listing-1",
-                                "title": "Oferta",
-                                "href": ("[lang]/ad/hpr/" "4pokojw-w-promocji-ID4Bmyv"),
+                                "title": "Synthetic Prefixed Listing",
+                                "href": (
+                                    "[lang]/ad/hpr/"
+                                    "synthetic-prefixed-listing-ID4Bmyv"
+                                ),
                             }
                         ]
                     }
@@ -779,6 +936,19 @@ def test_ingest_estates_for_normalizes_prefixed_detail_url() -> None:
     )
 
     assert requested_detail_urls == [
-        f"{ESTATE_URL.rstrip('/')}/4pokojw-w-promocji-ID4Bmyv"
+        f"{ESTATE_URL.rstrip('/')}/synthetic-prefixed-listing-ID4Bmyv"
     ]
-    assert estates[0].url == f"{ESTATE_URL.rstrip('/')}/4pokojw-w-promocji-ID4Bmyv"
+    assert estates[0].url == (
+        f"{ESTATE_URL.rstrip('/')}/synthetic-prefixed-listing-ID4Bmyv"
+    )
+
+
+def _fixture_text(source_id: str, filename: str) -> str:
+    return (FIXTURE_ROOT / source_id / filename).read_text(encoding="utf-8")
+
+
+def _fixture_json(source_id: str, filename: str) -> dict[str, Any]:
+    payload = json.loads(_fixture_text(source_id, filename))
+
+    assert isinstance(payload, dict)
+    return payload

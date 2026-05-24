@@ -167,6 +167,9 @@ data/silver/
 data/gold/
 data/demo/
 
+# Local Docker helper state
+.docker/
+
 # Spyder project settings
 .spyderproject
 .spyproject

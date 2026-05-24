@@ -176,25 +176,25 @@ loop:
 
 ```bash
 docker compose build
-docker compose up -d ingestion
+./docker/run-ingestion.sh start
 ```
 
 Follow logs:
 
 ```bash
-docker compose logs -f ingestion
+./docker/run-ingestion.sh logs
 ```
 
 Stop the background loop:
 
 ```bash
-docker compose down
+./docker/run-ingestion.sh stop
 ```
 
 By default, the loop runs immediately and then every hour with:
 
 ```text
-INGESTION_ARGS="--max-page 1 --workers 1"
+INGESTION_ARGS="--workers 3"
 RUN_SILVER_ETL=true
 RUN_GOLD_ETL=false
 RUN_PUBLIC_ETL=false
@@ -206,8 +206,12 @@ Override runtime settings without editing source code:
 INGESTION_INTERVAL_SECONDS=21600 \
 INGESTION_ARGS="--estate-type dom --voivodeship opolskie --max-page 2 --workers 1" \
 RUN_GOLD_ETL=true \
-docker compose up -d ingestion
+./docker/run-ingestion.sh start
 ```
+
+After failed runs, the Docker loop retries after
+`INGESTION_FAILURE_INTERVAL_SECONDS` seconds. The Compose default is `300`, which
+is useful for transient network errors after host sleep or Wi-Fi reconnects.
 
 Run a one-off containerized smoke ingestion:
 

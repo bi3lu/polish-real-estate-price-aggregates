@@ -3,6 +3,7 @@ set -eu
 
 SOURCE_CONFIG="${SOURCE_CONFIG:-/app/config/sources.local.yaml}"
 INGESTION_INTERVAL_SECONDS="${INGESTION_INTERVAL_SECONDS:-3600}"
+INGESTION_FAILURE_INTERVAL_SECONDS="${INGESTION_FAILURE_INTERVAL_SECONDS:-300}"
 INGESTION_ON_START="${INGESTION_ON_START:-true}"
 INGESTION_ARGS="${INGESTION_ARGS:-}"
 RUN_SILVER_ETL="${RUN_SILVER_ETL:-true}"
@@ -11,7 +12,11 @@ RUN_PUBLIC_ETL="${RUN_PUBLIC_ETL:-false}"
 MAX_FAILURES_BEFORE_EXIT="${MAX_FAILURES_BEFORE_EXIT:-0}"
 
 failures=0
-first_run=true
+sleep_before_run=0
+
+if [ "$INGESTION_ON_START" != "true" ]; then
+    sleep_before_run="$INGESTION_INTERVAL_SECONDS"
+fi
 
 run_etl_stage() {
     stage="$1"
@@ -24,16 +29,9 @@ run_etl_stage() {
 }
 
 while true; do
-    if [ "$first_run" = "true" ]; then
-        first_run=false
-
-        if [ "$INGESTION_ON_START" != "true" ]; then
-            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Waiting ${INGESTION_INTERVAL_SECONDS}s before first ingestion run"
-            sleep "$INGESTION_INTERVAL_SECONDS"
-        fi
-    else
-        echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Waiting ${INGESTION_INTERVAL_SECONDS}s before next ingestion run"
-        sleep "$INGESTION_INTERVAL_SECONDS"
+    if [ "$sleep_before_run" -gt 0 ]; then
+        echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Waiting ${sleep_before_run}s before next ingestion run"
+        sleep "$sleep_before_run"
     fi
 
     echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Starting ingestion loop run"
@@ -44,6 +42,7 @@ while true; do
         run_etl_stage "gold" "$RUN_GOLD_ETL"
         run_etl_stage "public" "$RUN_PUBLIC_ETL"
         echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Ingestion loop run finished"
+        sleep_before_run="$INGESTION_INTERVAL_SECONDS"
         continue
     fi
 
@@ -54,4 +53,6 @@ while true; do
         echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Exiting after ${failures} consecutive failures" >&2
         exit 1
     fi
+
+    sleep_before_run="$INGESTION_FAILURE_INTERVAL_SECONDS"
 done

@@ -19,7 +19,7 @@ def test_parse_cli_args_defaults_to_all_configured_values() -> None:
 
     assert set(options.estate_types) == ESTATE_TYPES
     assert set(options.voivodeships) == VOIVODESHIPS
-    assert options.workers == 4
+    assert options.workers == 3
     assert options.ignore_checkpoints is False
     assert options.duplicate_page_stop_threshold == 0
     assert options.search_shard_strategy == DEFAULT_SEARCH_SHARD_STRATEGY
@@ -127,7 +127,7 @@ def test_run_cli_calls_ingester_with_selected_filters_and_prints_json(
         "estate_types": ("mieszkanie",),
         "voivodeships": ("mazowieckie",),
         "max_page": 2,
-        "workers": 4,
+        "workers": 3,
         "existing_external_ids_by_voivodeship": {},
         "start_pages_by_target": {},
         "duplicate_page_stop_threshold": 0,
@@ -151,7 +151,7 @@ def test_run_cli_calls_ingester_with_selected_filters_and_prints_json(
         "count": 1,
         "estate_types": ["mieszkanie"],
         "voivodeships": ["mazowieckie"],
-        "workers": 4,
+        "workers": 3,
         "ignore_checkpoints": False,
         "duplicate_page_stop_threshold": 0,
         "search_shard_strategy": "market-price",

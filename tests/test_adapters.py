@@ -13,6 +13,7 @@ from src.ingestion.adapters.base import (
 )
 from src.ingestion.models import CanonicalListing
 from src.ingestion.pipeline import ingest_canonical_listings
+from src.ingestion.sharding import SearchShard
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sources"
 
@@ -81,6 +82,23 @@ def test_paginated_adapter_builds_configured_search_urls() -> None:
         "https://example-listing-site.local/search"
         "?property=mieszkanie&region=pomorskie&page=2",
     ]
+
+
+def test_paginated_adapter_translates_canonical_shards_to_query_params() -> None:
+    adapter = PaginatedListingSourceAdapter(
+        config=_source_definition("paginated_listing_site"),
+    )
+
+    assert adapter.build_shard_query_params(
+        SearchShard(
+            key="market-primary__price-lt-300k",
+            price_to=300000,
+            market="primary",
+        )
+    ) == {
+        "search[filter_enum_market][0]": "primary",
+        "search[filter_float_price:to]": "300000",
+    }
 
 
 def test_embedded_json_adapter_parses_results_payload_for_source_b() -> None:

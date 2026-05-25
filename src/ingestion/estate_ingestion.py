@@ -16,8 +16,6 @@ from src.ingestion.parsing import (
     get_estate_info,
 )
 from src.ingestion.pipeline import (
-    SearchShard,
-    build_search_shards,
     ingest_canonical_listings,
     ingest_estates,
     ingest_estates_for,
@@ -26,6 +24,7 @@ from src.ingestion.pipeline import (
     iter_estates_for,
     iter_estates_threaded,
 )
+from src.ingestion.sharding import SearchShard, build_search_shards
 from src.ingestion.transport import (
     RequestThrottle,
     SourceBlockedError,

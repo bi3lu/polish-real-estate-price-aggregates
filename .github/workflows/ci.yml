@@ -47,7 +47,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
 
     steps:
       - name: Checkout repository
@@ -65,12 +64,77 @@ jobs:
         run: uv sync --dev
 
       - name: Run tests with coverage
-        run: uv run pytest --cov=src --cov-report=term-missing --cov-report=xml:coverage.xml
+        run: uv run pytest --cov=src --cov-report=term-missing --cov-report=json:coverage.json --cov-report=xml:coverage.xml
 
-      - name: Upload coverage to Codecov
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        uses: codecov/codecov-action@v5
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
         with:
-          files: ./coverage.xml
-          fail_ci_if_error: true
-          use_oidc: true
+          name: coverage-report
+          path: |
+            coverage.json
+            coverage.xml
+
+  coverage-badge:
+    name: Coverage Badge
+    needs: tests
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Download coverage artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+
+      - name: Build Shields endpoint
+        run: |
+          mkdir -p coverage-site
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          coverage = json.loads(Path("coverage.json").read_text(encoding="utf-8"))
+          percent = float(coverage["totals"]["percent_covered"])
+          rounded = round(percent)
+
+          if percent >= 95:
+              color = "brightgreen"
+          elif percent >= 90:
+              color = "green"
+          elif percent >= 80:
+              color = "yellowgreen"
+          elif percent >= 70:
+              color = "yellow"
+          elif percent >= 60:
+              color = "orange"
+          else:
+              color = "red"
+
+          badge = {
+              "schemaVersion": 1,
+              "label": "coverage",
+              "message": f"{rounded}%",
+              "color": color,
+              "cacheSeconds": 300,
+          }
+          Path("coverage-site/coverage.json").write_text(
+              json.dumps(badge, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: coverage-site
+
+      - name: Deploy coverage badge endpoint
+        id: deployment
+        uses: actions/deploy-pages@v4

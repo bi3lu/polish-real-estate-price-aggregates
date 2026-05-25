@@ -13,6 +13,7 @@ the host.
 | `.dockerignore` | Keeps private config, local data, caches, tests, and docs out of the build context. |
 | `docker-compose.yml` | Defines `ingestion` and `ingestion-once` services. |
 | `docker/ingestion-loop.sh` | Runs ingestion repeatedly with optional ETL stages. |
+| `docker/run-ingestion.sh` | Host-side helper for long-running macOS runs with `caffeinate`. |
 
 ## Required Local Files
 
@@ -44,19 +45,31 @@ docker compose build
 Start the loop:
 
 ```bash
+./docker/run-ingestion.sh start
+```
+
+The helper script is the recommended entry point for long-running local runs on
+macOS. Plain Compose still works:
+
+```bash
 docker compose up -d ingestion
 ```
+
+On macOS the helper starts Compose in detached mode and keeps a local
+`caffeinate` process alive so the host does not suspend Docker when the display
+turns off or the machine is locked. The display may still turn off; the
+important part is that system sleep is blocked while ingestion is running.
 
 View logs:
 
 ```bash
-docker compose logs -f ingestion
+./docker/run-ingestion.sh logs
 ```
 
 Stop:
 
 ```bash
-docker compose down
+./docker/run-ingestion.sh stop
 ```
 
 The service has `restart: unless-stopped`, so Docker restarts it after daemon or
@@ -79,8 +92,9 @@ The loop is controlled by environment variables on the `ingestion` service.
 | --- | --- | --- |
 | `SOURCE_CONFIG` | `/app/config/sources.local.yaml` | Config path passed to `main.py`. |
 | `INGESTION_INTERVAL_SECONDS` | `3600` | Sleep time between loop runs. |
+| `INGESTION_FAILURE_INTERVAL_SECONDS` | `300` | Sleep time before retrying after a failed ingestion run. |
 | `INGESTION_ON_START` | `true` | Run immediately on container start. Set `false` to wait one interval first. |
-| `INGESTION_ARGS` | `--workers 1` in Compose | Extra CLI args appended to `main.py`. |
+| `INGESTION_ARGS` | `--workers 3` in Compose | Extra CLI args appended to `main.py`. |
 | `RUN_SILVER_ETL` | `true` | Run `src.etl.silver` after successful ingestion. |
 | `RUN_GOLD_ETL` | `false` | Run `src.etl.gold` after successful ingestion. |
 | `RUN_PUBLIC_ETL` | `false` | Run `src.etl.public` after successful ingestion. |
@@ -93,7 +107,32 @@ INGESTION_INTERVAL_SECONDS=21600 \
 INGESTION_ARGS="--estate-type dom --voivodeship opolskie --max-page 2 --workers 1" \
 RUN_GOLD_ETL=true \
 RUN_PUBLIC_ETL=true \
-docker compose up -d ingestion
+./docker/run-ingestion.sh start
+```
+
+## Host Sleep And Locking
+
+Docker containers cannot keep a macOS host awake from inside the container. If
+the host suspends while `urllib` is waiting on a response, the current ingestion
+run can fail after wake-up with a transient network error. The container loop
+will keep retrying, but the recommended local setup is:
+
+```bash
+./docker/run-ingestion.sh start
+```
+
+Useful commands:
+
+```bash
+./docker/run-ingestion.sh status
+./docker/run-ingestion.sh logs
+./docker/run-ingestion.sh stop
+```
+
+If you do not want the helper to manage `caffeinate`, run:
+
+```bash
+DISABLE_KEEP_AWAKE=true ./docker/run-ingestion.sh start
 ```
 
 ## Operational Notes

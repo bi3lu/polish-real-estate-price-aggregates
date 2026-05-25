@@ -15,6 +15,9 @@ config/sources.local.yaml
 
 The local file is ignored by Git.
 
+Config loading uses `yaml.safe_load` from PyYAML and then validates the result
+with Pydantic models in `src/config/source_config.py`.
+
 ## Source Definition
 
 ```yaml
@@ -110,6 +113,18 @@ The current reusable adapters parse:
 `html_listing_site` sources use listing pages as the record source and do not
 fetch detail pages by default, because some HTML detail pages expose only shell
 or category state and no stable detail object.
+
+## Search Sharding
+
+Search sharding is defined canonically in `src/ingestion/sharding.py`.
+`SearchShard` stores neutral filters such as `price_from`, `price_to`, and
+`market`. It does not store source-specific query parameter names.
+
+Adapters translate canonical shards to query params through
+`build_shard_query_params()`. The default paginated adapter maps canonical
+price/market filters to the currently supported generic listing query
+convention, but pipeline orchestration no longer depends on those parameter
+names.
 
 ## CI and Tests
 

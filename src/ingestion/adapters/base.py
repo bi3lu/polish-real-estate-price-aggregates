@@ -17,6 +17,7 @@ from src.ingestion.parsing import (
     extract_listing_items,
     get_estate_info,
 )
+from src.ingestion.sharding import SearchShard, default_shard_query_params
 from src.ingestion.transport import (
     build_listing_url,
     extract_next_data_from_html,
@@ -33,6 +34,8 @@ class SourceAdapter(Protocol):
     def source_id(self) -> str: ...
 
     def build_search_urls(self) -> list[str]: ...
+
+    def build_shard_query_params(self, shard: SearchShard) -> Mapping[str, str]: ...
 
     def fetch(self, url: str) -> str: ...
 
@@ -102,6 +105,10 @@ class PaginatedListingSourceAdapter:
                     )
 
         return urls
+
+    def build_shard_query_params(self, shard: SearchShard) -> Mapping[str, str]:
+        """Translate a canonical shard into source-specific query parameters."""
+        return default_shard_query_params(shard)
 
     def fetch(self, url: str) -> str:
         """Fetch one URL as text."""

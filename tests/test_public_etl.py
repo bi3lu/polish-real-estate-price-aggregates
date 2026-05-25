@@ -14,6 +14,11 @@ from src.etl.public import (
     transform_gold_records_for_public,
 )
 from src.models.gold_estate import GoldListingFeature
+from src.models.public_estate import (
+    FORBIDDEN_PUBLIC_FIELD_NAMES,
+    PublicListingFeature,
+    assert_public_schema_safe,
+)
 
 
 def test_build_public_listing_feature_generalizes_sensitive_fields() -> None:
@@ -218,6 +223,7 @@ def test_run_gold_to_public_writes_public_dataset_without_private_columns(
 
     assert len(rows) == 2
     assert "record_id" not in rows[0]
+    assert FORBIDDEN_PUBLIC_FIELD_NAMES.isdisjoint(rows[0])
     assert "district" not in rows[0]
     assert "latitude" not in rows[0]
     assert "longitude" not in rows[0]
@@ -226,3 +232,8 @@ def test_run_gold_to_public_writes_public_dataset_without_private_columns(
     assert rows[0]["geo_lon_grid"] == ""
     assert rows[0]["public_target_price_pln"] == "500000.0"
     assert rows[0]["public_target_price_per_sqm_pln"] == "10100.0"
+
+
+def test_public_listing_feature_schema_rejects_private_field_leaks() -> None:
+    assert_public_schema_safe(PublicListingFeature)
+    assert FORBIDDEN_PUBLIC_FIELD_NAMES.isdisjoint(PublicListingFeature.model_fields)

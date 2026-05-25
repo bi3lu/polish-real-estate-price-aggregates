@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import ast
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.config.globals import PROJECT_ROOT
@@ -180,136 +180,9 @@ def load_source_config(path: Path | str | None = None) -> SourceConfig:
 
 
 def _load_yaml_mapping(path: Path) -> dict[str, Any]:
-    try:
-        import yaml  # type: ignore[import-untyped]
-
-    except ModuleNotFoundError:
-        parsed = _parse_supported_yaml(path.read_text(encoding="utf-8"))
-
-    else:
-        parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
+    parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
 
     if not isinstance(parsed, dict):
         raise ValueError(f"Source config root must be an object: {path}")
 
     return parsed
-
-
-def _parse_supported_yaml(text: str) -> dict[str, Any]:
-    """Parse the small YAML subset used by the public source config."""
-    result: dict[str, Any] = {}
-    current_source: dict[str, Any] | None = None
-    current_collection_key: str | None = None
-    current_collection_type: str | None = None
-
-    for raw_line in text.splitlines():
-        line_without_comment = raw_line.split("#", maxsplit=1)[0].rstrip()
-
-        if not line_without_comment.strip():
-            continue
-
-        stripped = line_without_comment.strip()
-
-        if stripped == "sources:":
-            result["sources"] = []
-            current_source = None
-            current_collection_key = None
-            current_collection_type = None
-            continue
-
-        if line_without_comment.startswith("  - "):
-            if not isinstance(result.get("sources"), list):
-                raise ValueError("Only top-level sources lists are supported")
-
-            current_source = {}
-            result["sources"].append(current_source)
-            current_collection_key = None
-            current_collection_type = None
-            key, value = _split_yaml_key_value(line_without_comment.strip()[2:])
-            current_source[key] = _parse_yaml_scalar(value)
-            continue
-
-        if line_without_comment.startswith("      - "):
-            if (
-                current_source is None
-                or current_collection_key is None
-                or current_collection_type != "list"
-            ):
-                raise ValueError("YAML list item is missing a parent key")
-
-            current_source[current_collection_key].append(
-                _parse_yaml_scalar(line_without_comment.strip()[1:].strip())
-            )
-            continue
-
-        if line_without_comment.startswith("      "):
-            if (
-                current_source is None
-                or current_collection_key is None
-                or current_collection_type != "dict"
-            ):
-                raise ValueError("YAML nested mapping item is missing a parent key")
-
-            nested_key, nested_value = _split_yaml_key_value(stripped)
-            current_source[current_collection_key][nested_key] = _parse_yaml_scalar(
-                nested_value
-            )
-            continue
-
-        if current_source is None:
-            key, value = _split_yaml_key_value(stripped)
-            result[key] = _parse_yaml_scalar(value)
-            continue
-
-        key, value = _split_yaml_key_value(stripped)
-
-        if value == "":
-            current_source[key] = {} if key == "property_type_mapping" else []
-            current_collection_key = key
-            current_collection_type = (
-                "dict" if key == "property_type_mapping" else "list"
-            )
-            continue
-
-        current_source[key] = _parse_yaml_scalar(value)
-        current_collection_key = None
-        current_collection_type = None
-
-    return result
-
-
-def _split_yaml_key_value(text: str) -> tuple[str, str]:
-    if ":" not in text:
-        raise ValueError(f"Expected YAML key-value pair: {text}")
-
-    key, value = text.split(":", maxsplit=1)
-    return key.strip(), value.strip()
-
-
-def _parse_yaml_scalar(value: str) -> Any:
-    if value == "":
-        return ""
-
-    if value in {"true", "True"}:
-        return True
-
-    if value in {"false", "False"}:
-        return False
-
-    try:
-        return ast.literal_eval(value)
-
-    except (SyntaxError, ValueError):
-        pass
-
-    try:
-        return int(value)
-
-    except ValueError:
-        pass
-
-    try:
-        return float(value)
-
-    except ValueError:
-        return value

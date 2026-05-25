@@ -1,11 +1,11 @@
 # Polish Real Estate Price Aggregates
 
 [![CI](https://github.com/bi3lu/polish-real-estate-price-aggregates/actions/workflows/ci.yml/badge.svg)](https://github.com/bi3lu/polish-real-estate-price-aggregates/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fbi3lu.github.io%2Fpolish-real-estate-price-aggregates%2Fcoverage.json)](https://github.com/bi3lu/polish-real-estate-price-aggregates/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Type Checked](https://img.shields.io/badge/type%20checked-mypy-blue)
 ![Code Style](https://img.shields.io/badge/code%20style-black-000000)
 ![Linting](https://img.shields.io/badge/linting-ruff-orange)
-[![Coverage](assets/coverage.svg)](assets/coverage.svg)
 
 Python data pipeline for collecting, normalizing, aggregating, and publishing
 analysis-ready Polish residential real estate listing data.
@@ -176,25 +176,25 @@ loop:
 
 ```bash
 docker compose build
-docker compose up -d ingestion
+./docker/run-ingestion.sh start
 ```
 
 Follow logs:
 
 ```bash
-docker compose logs -f ingestion
+./docker/run-ingestion.sh logs
 ```
 
 Stop the background loop:
 
 ```bash
-docker compose down
+./docker/run-ingestion.sh stop
 ```
 
 By default, the loop runs immediately and then every hour with:
 
 ```text
-INGESTION_ARGS="--max-page 1 --workers 1"
+INGESTION_ARGS="--workers 3"
 RUN_SILVER_ETL=true
 RUN_GOLD_ETL=false
 RUN_PUBLIC_ETL=false
@@ -206,8 +206,12 @@ Override runtime settings without editing source code:
 INGESTION_INTERVAL_SECONDS=21600 \
 INGESTION_ARGS="--estate-type dom --voivodeship opolskie --max-page 2 --workers 1" \
 RUN_GOLD_ETL=true \
-docker compose up -d ingestion
+./docker/run-ingestion.sh start
 ```
+
+After failed runs, the Docker loop retries after
+`INGESTION_FAILURE_INTERVAL_SECONDS` seconds. The Compose default is `300`, which
+is useful for transient network errors after host sleep or Wi-Fi reconnects.
 
 Run a one-off containerized smoke ingestion:
 
@@ -273,10 +277,13 @@ uv run python -m src.etl.public
 ```
 
 Silver loads bronze observations and writes normalized `CanonicalListing`
-records. Gold reads silver outputs and builds feature tables, geographic
-aggregates, segment aggregates, and quality metrics. Public ETL reads gold
-features and suppresses direct identifiers, street-level data, raw coordinates,
-URLs, image URLs, and seller identifiers.
+records. `CanonicalListing` is a private/internal contract and may contain
+listing-level fields such as URL, title, seller metadata, street, precise
+location, coordinates, and image-derived fields. Gold reads silver outputs and
+builds feature tables, geographic aggregates, segment aggregates, and quality
+metrics. Public ETL uses a separate public schema and suppresses direct
+identifiers, source identity, street-level data, raw coordinates, URLs, image
+URLs, and seller identifiers.
 
 ## Offline Demo
 
@@ -344,6 +351,7 @@ Key modules:
 | `src/ingestion/models.py` | Neutral ingestion models: `RawListingObservation`, `CanonicalListing`, source run stats. |
 | `src/ingestion/adapters/base.py` | `SourceAdapter` protocol and reusable neutral adapter classes. |
 | `src/ingestion/registry.py` | Adapter registry and dynamic adapter construction from config. |
+| `src/ingestion/sharding.py` | Source-neutral search shard definitions. |
 | `src/ingestion/transport.py` | HTTP fetching, throttling, embedded JSON extraction, retry and cooldown logic. |
 | `src/ingestion/parsing.py` | Payload-to-observation extraction. |
 | `src/ingestion/pipeline.py` | Pagination, source filtering, sharding, resume logic, threading. |
@@ -430,8 +438,9 @@ More detail: [docs/ethics.md](docs/ethics.md).
 ## Public Dataset
 
 The public export removes direct listing identifiers, URLs, seller identifiers,
-street-level information, raw coordinates, and image URLs. It also suppresses or
-generalizes location fields and rounds public price targets.
+source identity, street-level information, raw coordinates, and image URLs. It
+also suppresses or generalizes location fields and rounds public price targets.
+`src.models.public_estate` enforces a forbidden-field guard for public schemas.
 
 The current public dataset is a sample produced by configured runs, not an
 official market registry or a complete national dataset. Analytical outputs are

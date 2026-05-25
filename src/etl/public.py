@@ -14,7 +14,11 @@ from pydantic import ValidationError
 from src.config.globals import DEFAULT_MIN_GROUP_SIZE, GOLD_DATA_DIR, PUBLIC_DATA_DIR
 from src.config.types import T
 from src.models.gold_estate import GoldListingFeature
-from src.models.public_estate import PublicDataQuality, PublicListingFeature
+from src.models.public_estate import (
+    PublicDataQuality,
+    PublicListingFeature,
+    assert_public_schema_safe,
+)
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -376,6 +380,7 @@ def save_public_tables(
         ml_features=output_dir / f"estate_public_ml_features_{timestamp}.csv",
         data_quality=output_dir / f"estate_public_data_quality_{timestamp}.csv",
     )
+    assert_public_schema_safe(PublicListingFeature)
     _write_model_csv(
         output_paths.ml_features,
         tables.ml_features,

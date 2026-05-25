@@ -1,7 +1,7 @@
 # Polish Real Estate Price Aggregates
 
 [![CI](https://github.com/bi3lu/polish-real-estate-price-aggregates/actions/workflows/ci.yml/badge.svg)](https://github.com/bi3lu/polish-real-estate-price-aggregates/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fbi3lu.github.io%2Fpolish-real-estate-price-aggregates%2Fcoverage.json)](https://github.com/bi3lu/polish-real-estate-price-aggregates/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fbi3lu%2Fpolish-real-estate-price-aggregates%2Fcoverage-badge%2Fcoverage.json)](https://github.com/bi3lu/polish-real-estate-price-aggregates/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Type Checked](https://img.shields.io/badge/type%20checked-mypy-blue)
 ![Code Style](https://img.shields.io/badge/code%20style-black-000000)
